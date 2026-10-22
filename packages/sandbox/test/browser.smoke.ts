@@ -111,6 +111,22 @@ describe("the web app against the sandbox", () => {
     await browser.waitFor(".chat");
   });
 
+  it("hides dotfiles in the file tree when asked to", async () => {
+    const tree = () => browser.text(".file-list");
+    assert.ok(await browser.tap('button[aria-label="session menu"]'));
+    assert.ok(await browser.tap(".menu-popover .list-row"));
+    await until(async () => (await tree()).includes(".git"), "the tree to list .git");
+
+    assert.ok(await browser.tap('.file-view .check input'));
+    await until(async () => !(await tree()).includes(".git"), ".git to be hidden");
+    assert.ok((await tree()).includes("README.md"), "other entries stay");
+
+    assert.ok(await browser.tap('.file-view .check input'));
+    await until(async () => (await tree()).includes(".git"), ".git to come back");
+    assert.ok(await browser.tap('.file-view button[aria-label="back to chat"]'));
+    await browser.waitFor(".chat");
+  });
+
   it("keeps an open editor through a streaming turn", async () => {
     assert.ok(await browser.tap('button[aria-label="session menu"]'));
     assert.ok(await browser.tap(".menu-popover .list-row"));

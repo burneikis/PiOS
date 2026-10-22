@@ -34,7 +34,8 @@ describe("file editing", () => {
       headers: auth(),
     });
     const listing = (await response.json()) as { entries: { name: string; dir: boolean }[] };
-    assert.equal(listing.entries[0]?.name, "src");
+    const names = listing.entries.map((e) => e.name);
+    assert.deepEqual(names.slice(0, 2), [".git", "src"], "directories first, nothing hidden");
     assert.ok(listing.entries.some((e) => e.name === "README.md" && !e.dir));
   });
 

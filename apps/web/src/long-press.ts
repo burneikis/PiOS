@@ -12,7 +12,17 @@ const SLOP_PX = 10;
  * long press works the same way; the context menu is suppressed because on
  * Android it lands in the middle of the hold.
  */
-export function useLongPress(onFire: (() => void) | undefined) {
+export interface LongPressHandlers {
+  onPointerDown?: (event: PointerEvent) => void;
+  onPointerMove?: (event: PointerEvent) => void;
+  onPointerUp?: () => void;
+  onPointerCancel?: () => void;
+  onPointerLeave?: () => void;
+  onContextMenu?: (event: MouseEvent) => void;
+  onClick?: (event: MouseEvent) => void;
+}
+
+export function useLongPress(onFire: (() => void) | undefined): LongPressHandlers {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const origin = useRef<{ x: number; y: number } | null>(null);
   const fired = useRef(false);
