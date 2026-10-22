@@ -178,6 +178,31 @@ test("pairing works end to end through the relay", async () => {
   assert.ok(harness.server.auth.verify(deviceToken));
 });
 
+test("an oversized upload is refused through the relay and the route stays usable", async () => {
+  const cwd = mkdtempSync(join(scratch, "cwd-"));
+  const session = await openSession(harness, cwd);
+  const auth = { authorization: `Bearer ${harness.deviceToken}` };
+  const config = harness.server.config as { maxUploadBytes: number };
+  const limit = config.maxUploadBytes;
+  config.maxUploadBytes = 64 * 1024;
+  try {
+    const refused = await fetch(`${relayUrl}/upload?session=${session}&name=big.bin`, {
+      method: "POST",
+      headers: auth,
+      body: new Uint8Array(1024 * 1024),
+    });
+    assert.equal(refused.status, 413);
+    const small = await fetch(`${relayUrl}/upload?session=${session}&name=small.bin`, {
+      method: "POST",
+      headers: auth,
+      body: new Uint8Array(10),
+    });
+    assert.equal(small.status, 200);
+  } finally {
+    config.maxUploadBytes = limit;
+  }
+});
+
 test("large bodies cross in both directions byte for byte", async () => {
   const cwd = mkdtempSync(join(scratch, "cwd-"));
   const session = await openSession(harness, cwd);

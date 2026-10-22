@@ -1,6 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { WIRE_VERSION, type ServerFrame } from "@pios/protocol";
@@ -338,7 +338,7 @@ test("editing a file goes through its etag", async () => {
   client.close();
 });
 
-test("the session file tree lists files and skips noise", async () => {
+test("the session file tree lists every entry, build output included", async () => {
   const client = await hello(harness);
   const cwd = join(harness.dir, "tree");
   mkdirSync(join(cwd, "node_modules"), { recursive: true });
@@ -355,7 +355,7 @@ test("the session file tree lists files and skips noise", async () => {
   };
   assert.deepEqual(
     listing.entries.map((e) => e.name),
-    ["src", "readme.md"],
+    ["node_modules", "src", "readme.md"],
   );
   client.close();
 });
@@ -394,6 +394,32 @@ test("uploads land inside the session cwd", async () => {
   assert.equal(res.status, 200);
   const { path } = (await res.json()) as { path: string };
   assert.ok(path.startsWith(join(cwd, ".pios-uploads")), `escaped to ${path}`);
+  client.close();
+});
+
+test("uploads into a folder keep their name and never overwrite", async () => {
+  const client = await hello(harness);
+  const cwd = join(harness.dir, "upload-dir");
+  mkdirSync(join(cwd, "docs"), { recursive: true });
+  writeFileSync(join(cwd, "docs", "my notes.txt"), "original");
+  const sessionId = await createSession(client, cwd);
+
+  const post = (query: string) =>
+    fetch(`${harness.baseUrl}/upload?session=${sessionId}&${query}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${harness.deviceToken}` },
+      body: Buffer.from("new"),
+    });
+
+  const res = await post(`dir=docs&name=${encodeURIComponent("my notes.txt")}`);
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as { path: string; relativePath: string };
+  assert.equal(body.relativePath, join("docs", "my notes (2).txt"));
+  assert.equal(readFileSync(join(cwd, "docs", "my notes.txt"), "utf8"), "original");
+  assert.equal(readFileSync(body.path, "utf8"), "new");
+
+  assert.equal((await post("dir=../..&name=x.txt")).status, 404);
+  assert.equal((await post("dir=missing&name=x.txt")).status, 404);
   client.close();
 });
 

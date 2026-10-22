@@ -1,19 +1,22 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { TextFile } from "@pios/protocol";
-import type { FileAccess } from "../files.ts";
+import { fetchFile, saveToDevice, uploadFile, type FileAccess } from "../files.ts";
 import {
   dropDraft,
   loadDraft,
+  loadHideDotfiles,
   loadTextFile,
   loadTree,
   loadWrapLines,
   saveDraft,
+  saveHideDotfiles,
   saveWrapLines,
   saveTextFile,
   searchFiles,
   type TreeListing,
 } from "../file-edit.ts";
-import { isolate } from "../format.ts";
+import { basename, byteSize, isolate, messageOf } from "../format.ts";
 import type { EditorHandle } from "./code-editor.tsx";
 import {
   ChevronLeftIcon,
@@ -22,9 +25,10 @@ import {
   FolderIcon,
   RedoIcon,
   UndoIcon,
+  UploadIcon,
   WrapIcon,
 } from "./icons.tsx";
-import { ListRowButton, SearchField } from "./ui.tsx";
+import { ListRowButton, ModalCard, PickerHeader, SearchField } from "./ui.tsx";
 
 /**
  * Identity of an access, for effect dependencies.
@@ -91,9 +95,37 @@ function FilePicker({ access, onPick, onClose }: {
   const [listing, setListing] = useState<TreeListing | null>(null);
   const [dir, setDir] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+  const [hideDotfiles, setHideDotfiles] = useState(loadHideDotfiles);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [uploadNote, setUploadNote] = useState<string | null>(null);
+  const [reloads, setReloads] = useState(0);
   const at = useRef(access);
   at.current = access;
   const key = accessKey(access);
+
+  async function upload(picked: FileList | null) {
+    const target = listing?.path;
+    const chosen = Array.from(picked ?? []);
+    if (!target || chosen.length === 0) return;
+    setError(null);
+    const landed: string[] = [];
+    for (const [index, file] of chosen.entries()) {
+      setUploadNote(`Uploading ${index + 1} of ${chosen.length}\u2026`);
+      try {
+        landed.push(basename((await uploadFile(at.current, file, target)).path));
+      } catch (cause) {
+        setError(`${file.name} was not uploaded: ${messageOf(cause)}`);
+      }
+    }
+    // A renamed file is only noticed if it is named.
+    setUploadNote(landed.length > 0 ? `Uploaded ${landed.join(", ")}` : null);
+    setReloads((n) => n + 1);
+  }
+
+  function toggleDotfiles(hide: boolean) {
+    saveHideDotfiles(hide);
+    setHideDotfiles(hide);
+  }
 
   useEffect(() => {
     if (!query.trim()) return;
@@ -116,7 +148,7 @@ function FilePicker({ access, onPick, onClose }: {
     return () => {
       live = false;
     };
-  }, [key, dir]);
+  }, [key, dir, reloads]);
 
   const browsing = !query.trim();
   // At the top it is the project; below it, the path inside the project.
@@ -128,10 +160,32 @@ function FilePicker({ access, onPick, onClose }: {
           <ChevronLeftIcon />
         </button>
         <h2 className="line tail">{here ? isolate(here) : "Files"}</h2>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={hideDotfiles}
+            onChange={(event) => toggleDotfiles(event.target.checked)}
+          />
+          Hide hidden
+        </label>
+        {browsing && listing ? (
+          <label className="attach ghost icon" title="Upload to this folder" aria-label="upload to this folder">
+            <input
+              type="file"
+              multiple
+              onChange={(event) => {
+                void upload(event.target.files);
+                event.target.value = "";
+              }}
+            />
+            <UploadIcon />
+          </label>
+        ) : null}
       </header>
 
       <SearchField value={query} placeholder="Search files" onChange={setQuery} />
       {error ? <p className="banner error">{error}</p> : null}
+      {uploadNote ? <p className="banner">{uploadNote}</p> : null}
 
       <div className="scroll-y file-list">
         {browsing ? (
@@ -141,25 +195,97 @@ function FilePicker({ access, onPick, onClose }: {
                 ..
               </ListRowButton>
             ) : null}
-            {listing?.entries.map((entry) => (
-              <ListRowButton
-                key={entry.path}
-                icon={entry.dir ? <FolderIcon /> : <FileIcon />}
-                onClick={() => (entry.dir ? setDir(entry.path) : onPick(entry.path))}
-              >
-                {isolate(entry.name)}
-              </ListRowButton>
-            ))}
+            {listing?.entries
+              .filter((entry) => !(hideDotfiles && entry.name.startsWith(".")))
+              .map((entry) => (
+                <ListRowButton
+                  key={entry.path}
+                  icon={entry.dir ? <FolderIcon /> : <FileIcon />}
+                  onClick={() => (entry.dir ? setDir(entry.path) : onPick(entry.path))}
+                  onLongPress={entry.dir ? undefined : () => setSaving(entry.path)}
+                >
+                  {isolate(entry.name)}
+                </ListRowButton>
+              ))}
           </>
         ) : (
           matches.map((match) => (
-            <ListRowButton key={match} icon={<FileIcon />} onClick={() => onPick(match)}>
+            <ListRowButton
+              key={match}
+              icon={<FileIcon />}
+              onClick={() => onPick(match)}
+              onLongPress={() => setSaving(match)}
+            >
               {isolate(match)}
             </ListRowButton>
           ))
         )}
       </div>
+
+      {saving ? (
+        <SaveSheet access={access} path={saving} onClose={() => setSaving(null)} />
+      ) : null}
     </section>
+  );
+}
+
+/**
+ * Copying a file from the machine to this device.
+ *
+ * The bytes are fetched as soon as the sheet opens and handed over on a tap:
+ * the share sheet only opens from a tap, and one that waited on the network
+ * first no longer counts as one.
+ */
+function SaveSheet({ access, path, onClose }: {
+  access: FileAccess;
+  path: string;
+  onClose: () => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const at = useRef(access);
+  at.current = access;
+  const key = accessKey(access);
+
+  useEffect(() => {
+    let live = true;
+    void fetchFile(at.current, path)
+      .then((fetched) => live && setFile(fetched))
+      .catch((cause: unknown) => live && setError(`Could not read it: ${messageOf(cause)}`));
+    return () => {
+      live = false;
+    };
+  }, [key, path]);
+
+  function save(ready: File) {
+    saveToDevice(ready)
+      .then(onClose)
+      .catch((cause: unknown) => setError(`Could not save it: ${messageOf(cause)}`));
+  }
+
+  return createPortal(
+    <ModalCard className="picker save-file" overlay>
+      <PickerHeader title="Save to device" onCancel={onClose} />
+      <div className="save-file-name">
+        <p className="line tail">{isolate(basename(path))}</p>
+        {error ? null : <p className="muted">{file ? byteSize(file.size) : "Fetching…"}</p>}
+      </div>
+      {error ? <p className="banner error">{error}</p> : null}
+      <div className="row">
+        <button type="button" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="primary"
+          disabled={!file}
+          onClick={() => file && save(file)}
+        >
+          Save
+        </button>
+      </div>
+    </ModalCard>,
+    document.body,
   );
 }
 

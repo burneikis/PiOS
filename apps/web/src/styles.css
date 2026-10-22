@@ -505,6 +505,18 @@ button.link {
   max-height: 100%;
 }
 
+.picker.save-file {
+  height: auto;
+}
+
+.save-file-name p {
+  margin: 0;
+}
+
+.picker.save-file .row {
+  justify-content: flex-end;
+}
+
 /* Scrolls as a whole rather than per section: the machine row at the foot
    is part of the same page of choices. */
 .picker.settings {
@@ -1028,11 +1040,12 @@ button.scroll-bottom {
   padding: 10px 14px;
 }
 
-/* A long press on a user turn branches from it, so the platform's own hold
-   gestures must not claim it first. Safari needs the prefixed property and
+/* A long press on a user turn branches from it, and one on a file row saves
+   it, so the platform's own hold gestures must not claim it first. Safari needs the prefixed property and
    the callout opt-out, or the hold becomes a selection before the timer
    fires; `touch-action` keeps the press from being read as a pan. */
-.bubble.user.pressable {
+.bubble.user.pressable,
+.list-row.pressable {
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
@@ -1639,7 +1652,7 @@ button.scroll-bottom {
   font-size: 14px;
 }
 
-.git-check {
+.check {
   display: flex;
   flex-direction: row;
   flex: 0 0 auto;
@@ -1651,7 +1664,7 @@ button.scroll-bottom {
 }
 
 /* The shared control height would turn a tick box into a 44px slab. */
-.git-check > input[type="checkbox"] {
+.check > input[type="checkbox"] {
   flex: 0 0 auto;
   width: 18px;
   height: 18px;
@@ -2004,6 +2017,28 @@ button.scroll-bottom {
   border-radius: 10px;
   margin-right: 6px;
   cursor: pointer;
+}
+
+.attachments.files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 0.85em;
+}
+
+.file-chip.failed {
+  border-color: var(--error);
+  color: var(--error);
 }
 
 .attach input {
