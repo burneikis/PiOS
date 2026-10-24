@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "pnpm typecheck && pnpm -r test",
+    "test": "pnpm run --aggregate-output \"/^(typecheck|test:packages)$/\"",
+    "test:packages": "pnpm -r test",
     "test:browser": "pnpm -F @pios/sandbox test:browser",
     "typecheck": "tsc --noEmit",
     "build:web": "pnpm -F @pios/web build",

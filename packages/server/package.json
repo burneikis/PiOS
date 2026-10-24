@@ -11,7 +11,7 @@
     "pios-server": "./src/cli.ts"
   },
   "scripts": {
-    "test": "node --test 'test/*.test.ts'",
+    "test": "node --test --test-force-exit --test-timeout=60000 'test/*.test.ts'",
     "start": "node src/cli.ts serve"
   },
   "dependencies": {

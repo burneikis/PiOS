@@ -9,7 +9,7 @@
     "./gate": "./src/gate.ts"
   },
   "scripts": {
-    "test": "tsc -p tsconfig.json && node --test 'test/*.test.ts'",
+    "test": "tsc -p tsconfig.json && node --test --test-force-exit --test-timeout=60000 'test/*.test.ts'",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "usage": "node scripts/usage.ts"

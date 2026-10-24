@@ -41,6 +41,8 @@ const DEFAULT_SCROLLBACK = 512 * 1024;
 /** A PTY read is often a few bytes; one frame per read floods the relay. */
 const COALESCE_MS = 4;
 const CONGESTION_POLL_MS = 50;
+/** A SIGHUP that lands while the shell is still starting can be lost. */
+const KILL_GRACE_MS = 1000;
 
 /**
  * A shell on a PTY, owned by the daemon rather than by any socket.
@@ -65,6 +67,7 @@ export class Terminal {
   private pending = "";
   private flushTimer: NodeJS.Timeout | null = null;
   private congestionTimer: NodeJS.Timeout | null = null;
+  private killTimer: NodeJS.Timeout | null = null;
   private exitInfo: TerminalExit | null = null;
   private cols: number;
   private rows: number;
@@ -149,9 +152,16 @@ export class Terminal {
   }
 
   kill(): void {
-    if (this.exitInfo) return;
+    if (this.exitInfo || this.killTimer) return;
+    this.signal();
+    this.killTimer = setTimeout(() => this.signal("SIGKILL"), KILL_GRACE_MS);
+    // The PTY holds the loop open on its own while the shell lives.
+    this.killTimer.unref();
+  }
+
+  private signal(name?: string): void {
     try {
-      this.pty.kill();
+      this.pty.kill(name);
     } catch {
       // Already gone; the exit handler reports it.
     }
@@ -226,6 +236,8 @@ export class Terminal {
   private onExit(info: TerminalExit): void {
     this.flush();
     this.exitInfo = info;
+    if (this.killTimer) clearTimeout(this.killTimer);
+    this.killTimer = null;
     if (this.congestionTimer) clearInterval(this.congestionTimer);
     this.congestionTimer = null;
     for (const listener of this.listeners) listener.exit(info);

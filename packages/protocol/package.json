@@ -9,7 +9,7 @@
     "./jsonl": "./src/jsonl.ts"
   },
   "scripts": {
-    "test": "node --test 'test/*.test.ts'"
+    "test": "node --test --test-force-exit --test-timeout=60000 'test/*.test.ts'"
   },
   "dependencies": {
     "zod": "^4.4.3"

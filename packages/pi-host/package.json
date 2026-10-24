@@ -8,7 +8,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "node --test 'test/*.test.ts'",
+    "test": "node --test --test-force-exit --test-timeout=60000 'test/*.test.ts'",
     "demo": "node test/driver.ts"
   },
   "dependencies": {
