@@ -15,12 +15,10 @@ KillMode=mixed
 TimeoutStopSec=10
 
 # The daemon runs the user's agent, so it deliberately has the user's access to
-# their own files. These only block privilege escalation beyond that.
+# their own files. This only blocks privilege escalation beyond that.
+# No PrivateTmp/Protect*: in a user unit they imply PrivateUsers=yes, which
+# shows root-owned files as nobody and breaks tools like ssh that check owners.
 NoNewPrivileges=true
-PrivateTmp=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
 
 [Install]
 WantedBy=default.target
