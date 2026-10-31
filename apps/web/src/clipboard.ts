@@ -15,6 +15,19 @@ export async function copyText(text: string): Promise<boolean> {
   return selectionCopy(text);
 }
 
+/**
+ * Reads clipboard text, or null where it cannot be read: outside a secure
+ * context there is no API, and the user may decline the system prompt.
+ */
+export async function readText(): Promise<string | null> {
+  if (!navigator.clipboard?.readText || !window.isSecureContext) return null;
+  try {
+    return await navigator.clipboard.readText();
+  } catch {
+    return null;
+  }
+}
+
 function selectionCopy(text: string): boolean {
   const previous = document.activeElement as HTMLElement | null;
   const box = document.createElement("textarea");

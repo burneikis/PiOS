@@ -2210,6 +2210,13 @@ button.scroll-bottom {
   min-width: var(--control);
 }
 
+/* Shared out evenly, so the whole row fits a narrow phone. */
+.term-keys button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-inline: 0;
+}
+
 /* Sticky modifier: lit while it waits for the key it modifies. */
 .term-keys button[aria-pressed="true"] {
   background: var(--accent);

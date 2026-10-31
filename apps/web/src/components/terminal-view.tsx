@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { TerminalExitInfo, TerminalHandle } from "@pios/client-core";
 import { useClient, useSupervisorState } from "../client-provider.tsx";
+import { readText } from "../clipboard.ts";
 import { collapseHome, isolate } from "../format.ts";
 import { useSettings } from "../settings.ts";
 import { ConfirmBar } from "./git/parts.tsx";
@@ -66,6 +67,7 @@ export function TerminalView({ terminalId, cwd, onClose }: {
   const [exit, setExit] = useState<TerminalExitInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmKill, setConfirmKill] = useState(false);
+  const [pasteFailed, setPasteFailed] = useState(false);
 
   function setCtrl(next: CtrlState) {
     ctrlRef.current = next;
@@ -162,6 +164,16 @@ export function TerminalView({ terminalId, cwd, onClose }: {
     xterm.focus();
   }
 
+  async function paste() {
+    const text = await readText();
+    const xterm = term.current;
+    if (!xterm) return;
+    setPasteFailed(text === null);
+    // Through xterm, so bracketed paste mode and newline handling apply.
+    if (text) xterm.paste(text);
+    xterm.focus();
+  }
+
   return (
     <section className="subview terminal-view">
       <header className="subview-head">
@@ -193,6 +205,9 @@ export function TerminalView({ terminalId, cwd, onClose }: {
         />
       ) : null}
       {error ? <p className="banner error">{error}</p> : null}
+      {pasteFailed ? (
+        <p className="banner warn">Could not read the clipboard.</p>
+      ) : null}
       {transport !== "connected" && !error ? (
         <p className="banner warn">Not connected. Keys typed now are not sent.</p>
       ) : null}
@@ -236,6 +251,14 @@ export function TerminalView({ terminalId, cwd, onClose }: {
               {k.label}
             </button>
           ))}
+          <button
+            type="button"
+            aria-label="paste"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => void paste()}
+          >
+            paste
+          </button>
         </div>
       )}
     </section>
