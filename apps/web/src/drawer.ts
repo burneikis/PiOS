@@ -18,6 +18,15 @@ function activated(): boolean {
   return navigator.userActivation?.isActive ?? true;
 }
 
+// WebKit turns the left-edge swipe into its own history back as soon as there
+// is an entry to return to, swallowing the touches the in-app edge swipe needs
+// to open the drawer. iOS has no system back button, so it gets no entries.
+// iPadOS reports itself as a Mac, so touch support is the tell.
+const usesHistory = !(
+  /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+);
+
 /**
  * Back walks drawer -> chat -> list -> out of the app. An open chat is one
  * history entry above the list, so system back from it reveals the list rather
@@ -31,6 +40,7 @@ export function useDrawer(chatting: boolean): [boolean, (open: boolean) => void]
   chattingNow.current = chatting;
 
   useEffect(() => {
+    if (!usesHistory) return;
     const onPop = () => setOpenState(currentEntry() !== "chat");
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -39,7 +49,7 @@ export function useDrawer(chatting: boolean): [boolean, (open: boolean) => void]
   // A launch straight into a session has no entry to go back to, and may not
   // push one until the first tap; capture runs before the tap's own handler.
   useLayoutEffect(() => {
-    if (!chatting || currentEntry() !== null) return;
+    if (!usesHistory || !chatting || currentEntry() !== null) return;
     const ensure = () => {
       if (!chattingNow.current || currentEntry() !== null || !activated()) return false;
       push("chat");
@@ -59,6 +69,11 @@ export function useDrawer(chatting: boolean): [boolean, (open: boolean) => void]
   }, [chatting]);
 
   const setOpen = useCallback((next: boolean) => {
+    if (!usesHistory) {
+      if (next) (document.activeElement as HTMLElement | null)?.blur();
+      setOpenState(next);
+      return;
+    }
     const at = currentEntry();
     if (next) {
       // Otherwise the keyboard stays up over the list.
