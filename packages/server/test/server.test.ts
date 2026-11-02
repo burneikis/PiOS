@@ -338,7 +338,7 @@ test("editing a file goes through its etag", async () => {
   client.close();
 });
 
-test("the session file tree lists files and skips noise", async () => {
+test("the session file tree lists every entry, build output included", async () => {
   const client = await hello(harness);
   const cwd = join(harness.dir, "tree");
   mkdirSync(join(cwd, "node_modules"), { recursive: true });
@@ -355,7 +355,7 @@ test("the session file tree lists files and skips noise", async () => {
   };
   assert.deepEqual(
     listing.entries.map((e) => e.name),
-    ["src", "readme.md"],
+    ["node_modules", "src", "readme.md"],
   );
   client.close();
 });

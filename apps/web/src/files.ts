@@ -90,24 +90,53 @@ export function useFileObjectUrl(path: string | null): {
   return { url, error };
 }
 
-/**
- * Saves a file from the project to this device.
- *
- * Handed over as an opaque download rather than opened: a blob URL shares
- * the app's origin, and an HTML file rendered there could run as the app.
- */
+/** Saves a file from the project to this device. */
 export async function downloadFile(access: FileAccess, path: string): Promise<void> {
+  await saveToDevice(await fetchFile(access, path));
+}
+
+export async function fetchFile(access: FileAccess, path: string): Promise<File> {
   if (!access.baseUrl) throw new Error("not connected");
   const url = `${access.baseUrl}/file?${projectQuery(access)}&path=${encodeURIComponent(path)}`;
   const response = await fetch(url, {
     headers: { authorization: `Bearer ${access.deviceToken}` },
   });
   if (!response.ok) throw new Error(response.status === 404 ? "not found" : "unavailable");
-  const blob = new Blob([await response.arrayBuffer()], { type: "application/octet-stream" });
-  const objectUrl = URL.createObjectURL(blob);
+  const type = response.headers.get("content-type") ?? "application/octet-stream";
+  return new File([await response.arrayBuffer()], path.split("/").at(-1) || "download", { type });
+}
+
+/**
+ * Hands a file to the platform: the share sheet on a phone, a download
+ * elsewhere.
+ *
+ * An installed iOS app has no usable download for a blob, so "Save to Files"
+ * in the share sheet is the way out. Sharing needs a fresh tap, so call this
+ * synchronously from one; without it the share is refused and this falls back
+ * to a download.
+ */
+export async function saveToDevice(file: File): Promise<void> {
+  const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+  if (touch && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file] });
+      return;
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === "AbortError") return;
+    }
+  }
+  triggerDownload(file);
+}
+
+/**
+ * Typed as opaque bytes rather than the file's own type: a blob URL shares
+ * the app's origin, and an HTML file rendered there could run as the app.
+ */
+function triggerDownload(file: File): void {
+  const objectUrl = URL.createObjectURL(new Blob([file], { type: "application/octet-stream" }));
   const link = document.createElement("a");
   link.href = objectUrl;
-  link.download = path.split("/").at(-1) || "download";
+  link.download = file.name;
   document.body.append(link);
   link.click();
   link.remove();

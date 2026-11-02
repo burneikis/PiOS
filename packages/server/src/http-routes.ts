@@ -8,8 +8,8 @@ import { WIRE_VERSION } from "@pios/protocol";
 import { AuthStore, bearerToken } from "./auth.ts";
 import { gitBranches, gitDiff, gitLog, gitStashes, gitStatus, GitError } from "./git.ts";
 import { gitAction, parseGitAction } from "./git-actions.ts";
-import { invalidateFileIndex, searchFiles, SKIP_DIRS } from "./file-index.ts";
-import { etagOf, MAX_EDIT_BYTES, readTextFile, writeTextFile } from "./file-edit.ts";
+import { invalidateFileIndex, searchFiles } from "./file-index.ts";
+import { MAX_EDIT_BYTES, readTextFile, writeTextFile } from "./file-edit.ts";
 import { containedPath } from "./paths.ts";
 import { IMAGE_CONTENT_TYPES, type ImageStore } from "./image-store.ts";
 import type { PushStore } from "./push.ts";
@@ -431,15 +431,17 @@ async function serveFile(ctx: RouteContext, url: URL, res: ServerResponse): Prom
   }
   if (!stat.isFile()) return json(res, 404, { error: "not_found" });
 
-  const bytes = readFileSync(path);
+  // Streamed: this is also the download route, and a download can be larger
+  // than the daemon should hold in memory.
   res.writeHead(200, {
     "content-type": CONTENT_TYPES[extname(path).toLowerCase()] ?? "application/octet-stream",
     "content-length": stat.size,
     // The agent rewrites files under the same path constantly.
     "cache-control": "no-store",
-    etag: etagOf(bytes),
   });
-  res.end(bytes);
+  const stream = createReadStream(path);
+  stream.on("error", () => res.destroy());
+  stream.pipe(res);
 }
 
 /**
@@ -519,10 +521,14 @@ async function projectPath(ctx: RouteContext, url: URL): Promise<string | null> 
   return root ? containedPath(root, requested) : null;
 }
 
-/** Directories first, then files, both alphabetical: a file tree, not a picker. */
+/**
+ * Directories first, then files, both alphabetical: a file tree, not a picker.
+ * Nothing is hidden: build output and dependencies are exactly what someone
+ * opens the tree to inspect, and listing one level at a time keeps it cheap.
+ */
 function treeListing(root: string, path: string, dirents: Dirent[]) {
   const entries = dirents
-    .filter((d) => (d.isDirectory() || d.isFile()) && !SKIP_DIRS.has(d.name))
+    .filter((d) => d.isDirectory() || d.isFile())
     .map((d) => ({ name: d.name, path: join(path, d.name), dir: d.isDirectory() }))
     .sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
 

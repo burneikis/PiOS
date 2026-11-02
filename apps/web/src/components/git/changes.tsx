@@ -48,7 +48,7 @@ export function ChangesTab({ git, run, draft, onDraft, onOpenDiff }: {
           onChange={(event) => onDraft({ message: event.target.value, amend })}
         />
         <div className="row spread git-commit-row">
-          <label className="git-check">
+          <label className="check">
             <input
               type="checkbox"
               checked={amend}

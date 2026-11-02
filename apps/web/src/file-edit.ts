@@ -115,6 +115,16 @@ export function saveWrapLines(wrap: boolean): void {
   browserStorage.set(WRAP_KEY, wrap ? "1" : "0");
 }
 
+const SHOW_DOTFILES_KEY = "pios.files.showDotfiles.v1";
+
+export function loadShowDotfiles(): boolean {
+  return browserStorage.get(SHOW_DOTFILES_KEY) !== "0";
+}
+
+export function saveShowDotfiles(show: boolean): void {
+  browserStorage.set(SHOW_DOTFILES_KEY, show ? "1" : "0");
+}
+
 /**
  * Unsaved edits, kept on the device only.
  *
