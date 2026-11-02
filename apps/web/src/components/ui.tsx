@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type MouseEventHandler, type ReactNode } from "react";
 import { isolate } from "../format.ts";
+import { useLongPress } from "../long-press.ts";
 import { CloseIcon, MoreIcon, SearchIcon } from "./icons.tsx";
 
 function withBase(base: string, className?: string): string {
@@ -35,9 +36,10 @@ export function ModalCard({ className, overlay, onSubmit, children }: {
  * A full-width, left-aligned, stacked-content tap target: session rows,
  * endpoint rows, directory rows. One style so lists cannot drift apart.
  */
-export function ListRowButton({ className, onClick, onMouseDown, icon, trailing, children }: {
+export function ListRowButton({ className, onClick, onLongPress, onMouseDown, icon, trailing, children }: {
   className?: string;
   onClick: () => void;
+  onLongPress?: () => void;
   /** Escape hatch for rows that must not steal focus from a field. */
   onMouseDown?: MouseEventHandler<HTMLButtonElement>;
   /** Leading glyph. Turns the row into an icon + stacked-text layout. */
@@ -45,12 +47,18 @@ export function ListRowButton({ className, onClick, onMouseDown, icon, trailing,
   trailing?: ReactNode;
   children: ReactNode;
 }) {
-  const base = icon || trailing ? "list-row iconic" : "list-row";
+  const press = useLongPress(onLongPress);
+  const shape = icon || trailing ? "list-row iconic" : "list-row";
+  const base = onLongPress ? `${shape} pressable` : shape;
   return (
     <button
       type="button"
       className={withBase(base, className)}
-      onClick={onClick}
+      {...press}
+      onClick={(event) => {
+        press.onClick?.(event);
+        if (!event.defaultPrevented) onClick();
+      }}
       onMouseDown={onMouseDown}
     >
       {icon ? <span className="row-icon">{icon}</span> : null}

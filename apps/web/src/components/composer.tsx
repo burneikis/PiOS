@@ -2,6 +2,8 @@ import type { ImageContent, ModelOption, StreamingBehavior } from "@pios/protoco
 import type { SessionCreate } from "@pios/client-core";
 import { useEffect, useRef, useState } from "react";
 import { useClient } from "../client-provider.tsx";
+import { uploadFile, useFileAccess } from "../files.ts";
+import { isolate, messageOf } from "../format.ts";
 import { useSettings } from "../settings.ts";
 import { browserStorage } from "../storage.ts";
 import { CommandMenu, slashQuery, useSlashCommands, type MenuEntry } from "./command-menu.tsx";
@@ -13,6 +15,17 @@ import { ModelPicker } from "./model-picker.tsx";
 import { ThinkingPicker } from "./thinking-picker.tsx";
 
 const DRAFT_PREFIX = "pios.draft.";
+
+/** A non-image file, copied into the project as soon as it is picked. */
+interface FileAttachment {
+  id: number;
+  name: string;
+  /** Set once the daemon has it. */
+  path?: string;
+  error?: string;
+}
+
+let nextAttachmentId = 0;
 
 /**
  * Composes a prompt and hands it to the outbox.
@@ -65,6 +78,8 @@ export function Composer({
   const steeringMode = useSettings().steeringMode;
   const [text, setText] = useState("");
   const [images, setImages] = useState<ImageContent[]>([]);
+  const [files, setFiles] = useState<FileAttachment[]>([]);
+  const access = useFileAccess();
   const [active, setActive] = useState(0);
   const field = useRef<HTMLTextAreaElement>(null);
   const thinkingSelect = useRef<HTMLSelectElement>(null);
@@ -124,6 +139,7 @@ export function Composer({
   useEffect(() => {
     setText(browserStorage.get(DRAFT_PREFIX + sessionId) ?? "");
     setImages([]);
+    setFiles([]);
   }, [sessionId]);
 
   // Keyed on the value, not on arrival: the daemon resends the same text on
@@ -164,9 +180,13 @@ export function Composer({
     entry.run("");
   }
 
+  const uploaded = files.flatMap((file) => (file.path ? [file.path] : []));
+  const uploading = files.some((file) => !file.path && !file.error);
+  const sendable = !uploading && (text.trim() !== "" || images.length > 0 || uploaded.length > 0);
+
   function send() {
     const trimmed = text.trim();
-    if (!trimmed && images.length === 0) return;
+    if (!sendable) return;
     // `/settings` is an app screen, not something the model should be told
     // about, however the line was finished.
     const native = nativeCommandFor(trimmed, localCommands);
@@ -186,17 +206,35 @@ export function Composer({
     }
     // Mandatory while the agent streams, ignored otherwise; sending it always
     // is simpler than tracking who won the race with `agent_settled`.
-    onSend(trimmed, images, running ? steeringMode : undefined);
+    // The model only sees text and images, so a file is handed over as a
+    // path it can read with its own tools.
+    const listed = uploaded.map((path) => `- ${path}`).join("\n");
+    const message = listed ? `${trimmed}${trimmed ? "\n\n" : ""}Attached files:\n${listed}` : trimmed;
+    onSend(message, images, running ? steeringMode : undefined);
     edit("");
     setImages([]);
+    setFiles([]);
   }
 
-  async function attach(files: Iterable<File> | null) {
-    for (const file of Array.from(files ?? [])) {
-      if (!file.type.startsWith("image/")) continue;
-      const image = await readImage(file);
+  async function attach(picked: Iterable<File> | null) {
+    for (const file of Array.from(picked ?? [])) {
+      // An image the model can look at directly; one it cannot decode here
+      // still reaches it as a file.
+      const image = file.type.startsWith("image/") ? await readImage(file) : null;
       if (image) setImages((current) => [...current, image]);
+      else upload(file);
     }
+  }
+
+  function upload(file: File) {
+    const id = nextAttachmentId++;
+    const update = (patch: Partial<FileAttachment>) =>
+      setFiles((current) => current.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+    setFiles((current) => [...current, { id, name: file.name }]);
+    if (!access?.baseUrl) return update({ error: "not connected" });
+    uploadFile(access, file)
+      .then((done) => update({ path: done.relativePath }))
+      .catch((cause: unknown) => update({ error: messageOf(cause) }));
   }
 
   return (
@@ -226,6 +264,25 @@ export function Composer({
         </div>
       ) : null}
 
+      {files.length > 0 ? (
+        <div className="attachments files">
+          {files.map((file) => (
+            <button
+              key={file.id}
+              type="button"
+              className={`file-chip${file.error ? " failed" : ""}`}
+              title={file.error ? `Upload failed: ${file.error}. Tap to remove.` : "Remove"}
+              onClick={() => setFiles(files.filter((f) => f.id !== file.id))}
+            >
+              <span className="line">{isolate(file.name)}</span>
+              <span className="muted">
+                {file.error ? "failed" : file.path ? "" : "uploading…"}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <textarea
         ref={field}
         value={text}
@@ -240,10 +297,10 @@ export function Composer({
         // A screenshot is the fastest way to show the agent something, and on
         // a phone the clipboard is often the only path to one.
         onPaste={(e) => {
-          const files = Array.from(e.clipboardData.files);
-          if (files.some((file) => file.type.startsWith("image/"))) {
+          const pasted = Array.from(e.clipboardData.files);
+          if (pasted.length > 0) {
             e.preventDefault();
-            void attach(files);
+            void attach(pasted);
           }
         }}
         onKeyDown={(e) => {
@@ -282,10 +339,9 @@ export function Composer({
         {/* Collapsed while typing: the pickers are one `/model` or `/thinking`
             away, and the room they take is transcript on a phone. */}
         <div className="composer-options">
-        <label className="attach ghost icon" title="Attach an image">
+        <label className="attach ghost icon" title="Attach images or files">
           <input
             type="file"
-            accept="image/*"
             multiple
             onChange={(e) => {
               void attach(e.target.files);
@@ -326,7 +382,7 @@ export function Composer({
           type="button"
           className="icon send"
           aria-label="send"
-          disabled={!text.trim() && images.length === 0}
+          disabled={!sendable}
           onClick={send}
         >
           <SendIcon />

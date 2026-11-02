@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import type { ChildProcess } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Browser } from "../src/browser.ts";
 import { startSandbox, type Sandbox } from "../src/sandbox.ts";
 import { appUrl, startWeb, waitForWeb } from "../src/web.ts";
@@ -57,6 +59,49 @@ describe("the web app against the sandbox", () => {
     await until(shows("echo: hello from the smoke test"), "the echo");
   });
 
+  /** Hands files to a file input the way a picker would. */
+  async function pick(selector: string, name: string, body: string): Promise<void> {
+    const picked = await browser.eval<boolean>(`(() => {
+      const input = document.querySelector(${JSON.stringify(selector)});
+      if (!input) return false;
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([${JSON.stringify(body)}], ${JSON.stringify(name)}, { type: "text/plain" }));
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    assert.ok(picked, `no ${selector}`);
+  }
+
+  const cwd = () => sandbox.server.registry.get("sbx-files")!.info.cwd;
+
+  it("attaches a file to a prompt as a path in the project", async () => {
+    await pick('.composer .attach input', "brief.txt", "from the phone");
+    await until(
+      async () => (await browser.text(".composer .file-chip")).includes("brief.txt") &&
+        !(await browser.text(".composer .file-chip")).includes("uploading"),
+      "the upload to finish",
+    );
+    await send("read this");
+    await until(shows(".pios-uploads/brief.txt"), "the path in the prompt");
+    assert.equal(readFileSync(join(cwd(), ".pios-uploads", "brief.txt"), "utf8"), "from the phone");
+  });
+
+  it("uploads into the folder the file tree is showing", async () => {
+    assert.ok(await browser.tap('button[aria-label="session menu"]'));
+    assert.ok(await browser.tap(".menu-popover .list-row"));
+    await until(async () => (await browser.text(".file-list")).includes("README.md"), "the tree");
+    await pick('.file-view .attach input', "README.md", "uploaded");
+    await until(
+      async () => (await browser.text(".file-list")).includes("README (2).md"),
+      "the renamed upload to be listed",
+    );
+    assert.equal(readFileSync(join(cwd(), "README (2).md"), "utf8"), "uploaded");
+    assert.notEqual(readFileSync(join(cwd(), "README.md"), "utf8"), "uploaded");
+    assert.ok(await browser.tap('.file-view button[aria-label="back to chat"]'));
+    await browser.waitFor(".chat");
+  });
+
   it("names the session with /name", async () => {
     await send("/name smoke session");
     await until(
@@ -108,6 +153,22 @@ describe("the web app against the sandbox", () => {
     assert.ok(await openGit());
     await until(async () => (await message()) === "smoke: keep me", "the message to survive");
     assert.ok(await browser.tap('.git-view button[aria-label="back to chat"]'));
+    await browser.waitFor(".chat");
+  });
+
+  it("hides dotfiles in the file tree when asked to", async () => {
+    const tree = () => browser.text(".file-list");
+    assert.ok(await browser.tap('button[aria-label="session menu"]'));
+    assert.ok(await browser.tap(".menu-popover .list-row"));
+    await until(async () => (await tree()).includes(".git"), "the tree to list .git");
+
+    assert.ok(await browser.tap('.file-view .check input'));
+    await until(async () => !(await tree()).includes(".git"), ".git to be hidden");
+    assert.ok((await tree()).includes("README.md"), "other entries stay");
+
+    assert.ok(await browser.tap('.file-view .check input'));
+    await until(async () => (await tree()).includes(".git"), ".git to come back");
+    assert.ok(await browser.tap('.file-view button[aria-label="back to chat"]'));
     await browser.waitFor(".chat");
   });
 
