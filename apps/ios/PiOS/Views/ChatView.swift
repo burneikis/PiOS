@@ -41,7 +41,7 @@ struct ChatView: View {
                     if let bash = view.bash {
                         BashRunView(run: bash) { model.client.abortBash(sessionId) }
                     }
-                    if view.running, view.items.last.map { isIdleTail($0) } ?? true {
+                    if view.running, view.items.last.map({ isIdleTail($0) }) ?? true {
                         WorkingIndicator(interrupting: view.interrupting, blocked: !view.dialogs.isEmpty)
                     }
                     if showStats, !view.running, let stats = model.statsFor(sessionId) {
