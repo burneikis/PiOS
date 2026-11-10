@@ -10,6 +10,9 @@ on:
       - "spikes/traces/**"
       - ".github/workflows/ios.yml"
 
+permissions:
+  contents: write
+
 jobs:
   ipa:
     runs-on: macos-15
@@ -54,6 +57,16 @@ jobs:
         with:
           name: PiOS-ipa
           path: apps/ios/PiOS.ipa
+
+      # A fixed URL a phone can open: .../releases/download/ios-latest/PiOS.ipa
+      - name: Publish ios-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete ios-latest --cleanup-tag -y || true
+          gh release create ios-latest PiOS.ipa --prerelease --target "$GITHUB_SHA" \
+            --title "PiOS iOS (latest build)" \
+            --notes "Unsigned build of ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Sideload with SideStore or AltStore."
 
       - uses: actions/upload-artifact@v4
         if: failure()
