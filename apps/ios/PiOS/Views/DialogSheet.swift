@@ -49,6 +49,7 @@ struct DialogSheet: View {
                     EmptyView()
                 }
             }
+            .themedList()
             .navigationTitle(request.title.map(stripAnsi) ?? "Extension")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

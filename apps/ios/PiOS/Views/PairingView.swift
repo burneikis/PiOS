@@ -25,13 +25,13 @@ struct PairingView: View {
                     Text("Pair with a machine").font(.title2.bold())
                     Text("Run `pios-server pair` on the machine, then scan its link as a QR code, paste it, or type the address and token.")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.muted)
                 }
                 .listRowBackground(Color.clear)
             }
 
             if let notice = model.pairingNotice {
-                Section { Label(notice, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+                Section { Label(notice, systemImage: "exclamationmark.triangle").foregroundStyle(Theme.warn) }
             }
 
             Section {
@@ -58,7 +58,7 @@ struct PairingView: View {
             }
 
             if let error {
-                Section { Text(error).foregroundStyle(.red) }
+                Section { Text(error).foregroundStyle(Theme.error) }
             }
 
             Section {
@@ -73,6 +73,7 @@ struct PairingView: View {
                 .disabled(busy || token.trimmingCharacters(in: .whitespaces).isEmpty || url.isEmpty)
             }
         }
+        .themedList()
         .navigationTitle("PiOS")
         .toolbar {
             if model.isPaired {

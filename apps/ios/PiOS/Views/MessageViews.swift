@@ -16,7 +16,7 @@ struct TranscriptItem: View {
             MessageView(message: message, tools: view.tools, cwd: cwd, failedAttempts: failedAttempts, blocked: !view.dialogs.isEmpty)
                 .contextMenu { menu(message: message, entryId: entryId) }
         case let .compaction(_, tokens):
-            CompactionMarker(tokensBefore: tokens)
+            TextDivider(text: tokens.map { "Context compacted from \(compactNumber($0)) tokens" } ?? "Context compacted")
         case let .streaming(partial):
             StreamingView(partial: partial, tools: view.tools, cwd: cwd, blocked: !view.dialogs.isEmpty)
         case let .pending(entry):
@@ -39,6 +39,8 @@ struct TranscriptItem: View {
     }
 }
 
+/// An assistant turn is the page, not an object on it: no border, no fill.
+/// Only the user's own words get a surface.
 struct MessageView: View {
     let message: AgentMessage
     let tools: [String: ToolExecution]
@@ -51,25 +53,26 @@ struct MessageView: View {
         case .user:
             UserBubble(text: message.text, images: message.images)
         case .assistant:
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 ForEach(Array(message.content.enumerated()), id: \.offset) { _, part in
                     AssistantPart(part: part, tools: tools, cwd: cwd, blocked: blocked)
                 }
                 if let failure = message.turnFailure {
-                    Label(failure, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.red)
+                    Text(failure)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.error)
                         .textSelection(.enabled)
                 }
                 if message.stopReason == "aborted" {
-                    Text("Stopped").font(.caption).foregroundStyle(.secondary)
+                    Text("Stopped").font(.system(size: 13)).foregroundStyle(Theme.muted)
                 }
                 if failedAttempts > 0 {
                     Text("Retried after \(failedAttempts) failed attempt\(failedAttempts == 1 ? "" : "s")")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.muted)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         case .bashExecution:
             BashEntryView(message: message)
         case .toolResult, .system:
@@ -89,7 +92,7 @@ struct AssistantPart: View {
         case let .text(text):
             MarkdownText(text: text)
         case let .thinking(text):
-            ThinkingView(text: text, done: true)
+            ThinkingView(text: text)
         case let .image(image):
             ImageContentView(image: image)
         case let .toolCall(call):
@@ -108,13 +111,13 @@ struct StreamingView: View {
     let blocked: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(partial.content.enumerated()), id: \.offset) { _, part in
                 switch part {
                 case let .text(text, _):
                     MarkdownText(text: text)
-                case let .thinking(text, done):
-                    ThinkingView(text: text, done: done)
+                case let .thinking(text, _):
+                    ThinkingView(text: text)
                 case let .toolCall(id, name, argsText, arguments, _):
                     if let id, let tool = tools[id] {
                         ToolCardView(tool: tool, cwd: cwd, blocked: blocked)
@@ -127,74 +130,83 @@ struct StreamingView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 struct UserBubble: View {
     let text: String
     var images: [ImageContent] = []
+    /// Edge drawn round the bubble: a failed prompt is outlined in red.
+    var outline: Color?
 
     var body: some View {
         HStack {
-            Spacer(minLength: 40)
+            Spacer(minLength: 48)
             VStack(alignment: .trailing, spacing: 6) {
                 ForEach(Array(images.enumerated()), id: \.offset) { _, image in
                     ImageContentView(image: image, maxHeight: 220)
                 }
                 if !text.isEmpty {
                     Text(text)
+                        .font(Theme.body)
+                        .lineSpacing(Theme.bodySpacing)
+                        .foregroundStyle(Theme.text)
                         .textSelection(.enabled)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 9)
-                        .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.raised))
+                        .overlay {
+                            if let outline {
+                                RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(outline)
+                            }
+                        }
                 }
             }
         }
     }
 }
 
+/// Reasoning reads as an aside: a rule in the margin, dimmer than the
+/// answer. Shown by default; a tap folds it to a one-line trace.
 struct ThinkingView: View {
     let text: String
-    let done: Bool
-    @State private var open = false
+    @AppStorage("pios.showThinking") private var showByDefault = true
+    @State private var shown: Bool?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                withAnimation(.snappy) { open.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "brain").font(.caption)
-                    Text(done ? "Thought" : "Thinking...").font(.caption.weight(.medium))
-                    if !done { ProgressView().controlSize(.mini) }
-                    Image(systemName: "chevron.right").font(.caption2).rotationEffect(.degrees(open ? 90 : 0))
-                }
-                .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            if open {
+        let isShown = shown ?? showByDefault
+        VStack(alignment: .leading, spacing: 4) {
+            Text(isShown ? "Thinking:" : "Thinking\u{2026}")
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.muted)
+            if isShown {
                 Text(text)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 14))
+                    .lineSpacing(4)
+                    .foregroundStyle(Theme.muted)
                     .textSelection(.enabled)
-                    .padding(.leading, 8)
-                    .overlay(alignment: .leading) { Rectangle().fill(.quaternary).frame(width: 2) }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 14)
+        .overlay(alignment: .leading) {
+            Rectangle().fill(isShown ? Theme.line : .clear).frame(width: 2)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { withAnimation(.snappy) { shown = !isShown } }
     }
 }
 
-struct CompactionMarker: View {
-    let tokensBefore: Double?
+/// A line with words in it, for boundaries in the history.
+struct TextDivider: View {
+    let text: String
 
     var body: some View {
-        HStack {
-            VStack { Divider() }
-            Text(tokensBefore.map { "Compacted (\(compactNumber($0)) tokens before)" } ?? "Compacted")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize()
-            VStack { Divider() }
+        HStack(spacing: 10) {
+            Rectangle().fill(Theme.line).frame(height: 1)
+            Text(text).font(.system(size: 13)).foregroundStyle(Theme.muted).fixedSize()
+            Rectangle().fill(Theme.line).frame(height: 1)
         }
     }
 }
@@ -206,25 +218,16 @@ struct PendingView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        let failed = entry.status == .failed
         VStack(alignment: .trailing, spacing: 6) {
-            UserBubble(text: entry.text, images: entry.images).opacity(0.6)
-            HStack(spacing: 6) {
-                switch entry.status {
-                case .queued:
-                    Image(systemName: "clock")
-                    Text("Queued")
-                case .sending:
-                    ProgressView().controlSize(.mini)
-                    Text(entry.streamingBehavior.map { $0 == .steer ? "Steering" : "Follow-up" } ?? "Sending")
-                case .failed:
-                    Image(systemName: "exclamationmark.circle").foregroundStyle(.red)
-                    Text(entry.lastError ?? "Failed").foregroundStyle(.red).lineLimit(2)
-                }
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            if entry.status == .failed {
-                HStack {
+            UserBubble(text: entry.text, images: entry.images, outline: failed ? Theme.error : nil)
+                .opacity(failed ? 1 : 0.6)
+            Text(statusText)
+                .font(.system(size: 13))
+                .foregroundStyle(failed ? Theme.error : Theme.muted)
+                .lineLimit(3)
+            if failed {
+                HStack(spacing: 6) {
                     if running {
                         Button("Steer") { model.client.outbox.requeue(entry.commandId, streamingBehavior: .steer) }
                         Button("Follow up") { model.client.outbox.requeue(entry.commandId, streamingBehavior: .followUp) }
@@ -233,11 +236,19 @@ struct PendingView: View {
                     }
                     Button("Discard", role: .destructive) { model.client.outbox.discard(entry.commandId) }
                 }
-                .font(.caption)
-                .buttonStyle(.bordered)
+                .font(.system(size: 13))
+                .glassButton()
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private var statusText: String {
+        switch entry.status {
+        case .queued: return "queued"
+        case .sending: return entry.streamingBehavior.map { $0 == .steer ? "steering" : "follow-up" } ?? "sending"
+        case .failed: return entry.lastError ?? "failed"
+        }
     }
 }
 
@@ -247,14 +258,9 @@ struct BashEntryView: View {
 
     var body: some View {
         BashCard(
-            command: message.command ?? "",
-            output: message.output ?? "",
-            running: false,
-            exitCode: message.exitCode,
-            cancelled: message.cancelled,
-            truncated: message.truncated,
-            excluded: message.excludeFromContext,
-            onAbort: nil
+            command: message.command ?? "", output: message.output ?? "", running: false,
+            exitCode: message.exitCode, cancelled: message.cancelled, truncated: message.truncated,
+            excluded: message.excludeFromContext, onAbort: nil
         )
     }
 }
@@ -266,18 +272,16 @@ struct BashRunView: View {
 
     var body: some View {
         BashCard(
-            command: run.command,
-            output: run.output,
-            running: run.running,
-            exitCode: run.result?.exitCode,
-            cancelled: run.result?.cancelled ?? false,
-            truncated: run.result?.truncated ?? false,
-            excluded: run.excludeFromContext,
+            command: run.command, output: run.output, running: run.running,
+            exitCode: run.result?.exitCode, cancelled: run.result?.cancelled ?? false,
+            truncated: run.result?.truncated ?? false, excluded: run.excludeFromContext,
             onAbort: run.running ? onAbort : nil
         )
     }
 }
 
+/// A `!` run is the user's own command, so it sits on their side; `!!`
+/// never reaches the model, and the dashed edge says so without a label.
 struct BashCard: View {
     let command: String
     let output: String
@@ -289,29 +293,58 @@ struct BashCard: View {
     let onAbort: (() -> Void)?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Text(excluded ? "!!" : "!").font(.system(.footnote, design: .monospaced).bold()).foregroundStyle(.orange)
-                Text(command).font(.system(.footnote, design: .monospaced)).lineLimit(3)
-                Spacer()
-                if running {
-                    ProgressView().controlSize(.mini)
-                    if let onAbort { Button("Stop", action: onAbort).font(.caption).buttonStyle(.bordered) }
-                } else if cancelled {
-                    Text("cancelled").font(.caption2).foregroundStyle(.secondary)
-                } else if let exitCode {
-                    Text("exit \(exitCode)").font(.caption2).foregroundStyle(exitCode == 0 ? Color.secondary : Color.red)
+        HStack {
+            Spacer(minLength: 16)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text("$ \(command)")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.muted)
+                        .lineLimit(3)
+                    Spacer(minLength: 4)
+                    if running {
+                        ProgressView().controlSize(.mini).tint(Theme.muted)
+                        if let onAbort { Button("Stop", action: onAbort).font(.system(size: 13)).buttonStyle(GhostButtonStyle()) }
+                    } else if cancelled {
+                        Text("cancelled").font(.system(size: 11)).foregroundStyle(Theme.muted)
+                    } else if let exitCode, exitCode != 0 {
+                        Text("exit \(exitCode)").font(.system(size: 11)).foregroundStyle(Theme.error)
+                    }
+                }
+                if !output.isEmpty { OutputWell(text: clip(output)) }
+                if truncated {
+                    Text("Output truncated").font(.system(size: 11)).foregroundStyle(Theme.muted)
                 }
             }
-            if !output.isEmpty {
-                CodeBlock(code: clip(output), language: nil)
-            }
-            if truncated {
-                Text("Output truncated").font(.caption2).foregroundStyle(.secondary)
-            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1, dash: excluded ? [4, 3] : []))
+            )
+            .opacity(excluded ? 0.75 : 1)
         }
-        .padding(10)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+/// Program output: columnar, so it scrolls sideways instead of wrapping.
+struct OutputWell: View {
+    let text: String
+    var color: Color = Theme.text
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Text(text)
+                .font(Theme.mono(11.5))
+                .lineSpacing(2)
+                .foregroundStyle(color)
+                .textSelection(.enabled)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.well))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line))
     }
 }
 

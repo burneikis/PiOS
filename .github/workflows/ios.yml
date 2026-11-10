@@ -15,7 +15,9 @@ permissions:
 
 jobs:
   ipa:
-    runs-on: macos-15
+    # The iOS 27 SDK: Liquid Glass on bars, menus and sheets, and the
+    # glassEffect APIs. Preview image; macos-26 (Xcode 26) also builds.
+    runs-on: xcode-27
     timeout-minutes: 30
     defaults:
       run:
@@ -24,9 +26,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Xcode
-        run: |
-          sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
-          xcodebuild -version
+        run: xcodebuild -version
 
       - name: Core tests
         run: swift test --package-path PiOSCore

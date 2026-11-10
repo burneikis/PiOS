@@ -1,15 +1,16 @@
 import PiOSCore
 import SwiftUI
 
-/// One tool call, correlated on `toolCallId`. Args and result arrive from
-/// different events (or from history instead), so it renders whatever is
-/// known rather than waiting for a complete pair.
+/// One tool call, correlated on `toolCallId`: a flat row, as in the PWA,
+/// with its body under a rule aligned to the row's glyph. Args and result
+/// arrive from different events (or from history), so it renders whatever
+/// is known rather than waiting for a complete pair.
 struct ToolCardView: View {
     let tool: ToolExecution
     let cwd: String?
     var blocked = false
     @AppStorage("pios.expandTools") private var expandDone = false
-    @State private var open: Bool? = nil
+    @State private var open: Bool?
 
     var body: some View {
         // A running tool is the live edge of the turn, so its output shows
@@ -18,76 +19,69 @@ struct ToolCardView: View {
         let headline = toolHeadline(tool.args)
         let images = tool.resultImages
 
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 4) {
             Button {
-                withAnimation(.snappy) { open = !isOpen }
+                withAnimation(.snappy(duration: 0.18)) { open = !isOpen }
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: toolSymbol(tool.toolName))
-                        .font(.footnote)
-                        .foregroundStyle(tool.isError ? Color.red : Color.secondary)
-                        .frame(width: 18)
-                    Text(tool.toolName).font(.footnote.weight(.semibold))
+                        .font(.system(size: 13))
+                        .foregroundStyle(tool.isError ? Theme.error : Theme.muted)
+                        .frame(width: 16)
+                    Text(tool.toolName)
+                        .font(Theme.mono(13))
+                        .foregroundStyle(Theme.text)
+                        .fixedSize()
                     Text(shortenPreview(headline, cwd: cwd))
-                        .font(.system(.footnote, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.muted)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Spacer(minLength: 4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     ToolStatus(tool: tool, blocked: blocked)
                     Image(systemName: "chevron.right")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.muted)
                         .rotationEffect(.degrees(isOpen ? 90 : 0))
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .padding(.horizontal, -8)
 
             // Outside the disclosure: when a tool returns an image, the image
             // is the result, not a detail of it.
             if !images.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(Array(images.enumerated()), id: \.offset) { _, image in
-                        ImageContentView(image: image, maxHeight: 260)
+                        ImageContentView(image: image, maxHeight: 320)
                     }
                 }
-                .padding([.horizontal, .bottom], 10)
+                .padding(.leading, 12)
             }
 
             if isOpen {
-                VStack(alignment: .leading, spacing: 8) {
-                    if !headline.isEmpty, headline.count > 40 || headline.contains("\n") {
-                        CodeBlock(code: headline, language: nil)
-                    }
+                VStack(alignment: .leading, spacing: 6) {
+                    // Repeated in full: the row clips it to one line.
+                    if !headline.isEmpty { OutputWell(text: headline) }
                     ForEach(Array(editBlocks(tool.args).enumerated()), id: \.offset) { _, edit in
                         if let old = edit.oldText {
                             DiffView(lines: diffLines(old, edit.newText))
                         } else {
-                            CodeBlock(code: clip(edit.newText), language: nil)
+                            OutputWell(text: clip(edit.newText))
                         }
                     }
                     let rest = leftoverArgs(tool.args)
-                    if !rest.isEmpty {
-                        Text(rest).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
-                    }
+                    if !rest.isEmpty { OutputWell(text: rest, color: Theme.muted) }
                     let output = tool.resultText
-                    CodeBlock(
-                        code: output.isEmpty ? placeholder : clip(output),
-                        language: nil,
-                        tint: tool.isError ? .red : nil
-                    )
+                    OutputWell(text: output.isEmpty ? placeholder : clip(output), color: tool.isError ? Theme.error : Theme.text)
                 }
-                .padding([.horizontal, .bottom], 10)
+                .padding(.leading, 12)
+                .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 2) }
             }
         }
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(tool.isError ? Color.red.opacity(0.4) : Color.clear)
-        )
     }
 
     private var placeholder: String {
@@ -101,21 +95,20 @@ struct ToolStatus: View {
 
     var body: some View {
         if tool.isError {
-            Text("failed").font(.caption2).foregroundStyle(.red)
+            Text("failed").font(.system(size: 11)).foregroundStyle(Theme.error)
         } else if tool.status == .abandoned {
-            Text("no result").font(.caption2).foregroundStyle(.secondary)
+            Text("no result").font(.system(size: 11)).foregroundStyle(Theme.muted)
         } else if tool.status == .running {
             if blocked {
-                Text("waiting for approval").font(.caption2).foregroundStyle(.orange)
+                Text("waiting for approval").font(.system(size: 11)).foregroundStyle(Theme.warn)
             } else {
-                // Counted locally from the daemon's start time, already moved
-                // into this clock by the store.
+                // Counted from the daemon's start time, already in this clock.
                 if let startedAt = tool.startedAt {
                     TimelineView(.periodic(from: .now, by: 1)) { _ in
                         DurationText(ms: nowMs() - startedAt)
                     }
                 }
-                ProgressView().controlSize(.mini)
+                ProgressView().controlSize(.mini).tint(Theme.muted)
             }
         } else if let duration = tool.durationMs {
             DurationText(ms: duration)
@@ -131,12 +124,13 @@ struct DurationText: View {
         if ms >= 1000 {
             let seconds = Int((ms / 1000).rounded())
             Text(seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(seconds % 60)s")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(Theme.muted)
         }
     }
 }
 
+/// The same block a diff gets everywhere: coloured lines in an output well.
 struct DiffView: View {
     let lines: [DiffLine]
 
@@ -145,39 +139,37 @@ struct DiffView: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(lines.prefix(400).enumerated()), id: \.offset) { _, line in
                     Text(prefix(line.kind) + line.text)
-                        .font(.system(.caption, design: .monospaced))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 6)
-                        .background(background(line.kind))
-                        .foregroundStyle(foreground(line.kind))
+                        .foregroundStyle(color(line.kind))
                 }
                 if lines.count > 400 {
-                    Text("... \(lines.count - 400) more lines").font(.caption2).foregroundStyle(.secondary).padding(6)
+                    Text("... \(lines.count - 400) more lines").foregroundStyle(Theme.muted)
                 }
             }
+            .font(Theme.mono(11.5))
+            .lineSpacing(2)
             .textSelection(.enabled)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
         }
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.well))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line))
     }
 
     private func prefix(_ kind: DiffLine.Kind) -> String {
         switch kind {
-        case .add: return "+ "
-        case .remove: return "- "
-        case .same: return "  "
+        case .add: return "+"
+        case .remove: return "-"
+        case .same: return " "
         }
     }
 
-    private func background(_ kind: DiffLine.Kind) -> Color {
+    private func color(_ kind: DiffLine.Kind) -> Color {
         switch kind {
-        case .add: return .green.opacity(0.15)
-        case .remove: return .red.opacity(0.15)
-        case .same: return .clear
+        case .add: return Theme.ok
+        case .remove: return Theme.error
+        case .same: return Theme.muted
         }
-    }
-
-    private func foreground(_ kind: DiffLine.Kind) -> Color {
-        kind == .same ? .secondary : .primary
     }
 }
 

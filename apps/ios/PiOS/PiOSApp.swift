@@ -10,6 +10,8 @@ struct PiOSApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
+                .preferredColorScheme(.dark)
+                .tint(Theme.accent)
                 .onChange(of: scenePhase) { _, phase in model.setScenePhase(phase) }
                 .onOpenURL { url in openPairingLink(url) }
         }
@@ -24,9 +26,6 @@ struct PiOSApp: App {
     }
 }
 
-/// One list, two presentations: docked beside the chat on iPad, a stack on
-/// iPhone. `NavigationSplitView` keeps the open chat and its draft mounted
-/// across a rotation, so a resize is never a navigation event.
 struct RootView: View {
     @Environment(AppModel.self) private var model
 
@@ -34,26 +33,160 @@ struct RootView: View {
         @Bindable var model = model
         Group {
             if model.isPaired {
-                NavigationSplitView {
-                    SessionListView()
-                } detail: {
-                    if let id = model.selection {
-                        ChatView(sessionId: id).id(id)
-                    } else {
-                        ContentUnavailableView(
-                            "No session open", systemImage: "bubble.left.and.text.bubble.right",
-                            description: Text("Pick a session or start a new one.")
-                        )
-                    }
-                }
+                Workspace()
             } else {
                 NavigationStack { PairingView() }
             }
         }
+        .background(Theme.bg.ignoresSafeArea())
         .sheet(isPresented: $model.showPairing) {
             NavigationStack { PairingView() }
         }
+        .sheet(isPresented: $model.showSettings) {
+            NavigationStack { SettingsView() }
+        }
+        .sheet(item: Binding(
+            get: { model.pickerStart.map(PickerStart.init) },
+            set: { model.pickerStart = $0?.path }
+        )) { start in
+            NavigationStack { DirectoryPicker(start: start.path.isEmpty ? nil : start.path) }
+        }
         .overlay(alignment: .top) { ToastView() }
+    }
+}
+
+private struct PickerStart: Identifiable {
+    var path: String
+    var id: String { path }
+}
+
+/// One list, two presentations, as in the PWA: docked beside the chat when
+/// there is room, a drawer over it when there is not. The chat stays mounted
+/// either way, so opening the list is never a navigation event and a
+/// rotation loses neither the draft nor the scroll position.
+struct Workspace: View {
+    @Environment(AppModel.self) private var model
+    /// Drag translation in points; positive pulls the drawer open.
+    @State private var drag: CGFloat = 0
+
+    /// The PWA's breakpoint.
+    private static let dockWidth: CGFloat = 720
+
+    var body: some View {
+        GeometryReader { geo in
+            if geo.size.width > Self.dockWidth {
+                docked
+            } else {
+                narrow(width: geo.size.width)
+            }
+        }
+    }
+
+    private var docked: some View {
+        HStack(spacing: 0) {
+            if model.sidebarVisible {
+                Sidebar()
+                    .frame(width: 320)
+                    .transition(.move(edge: .leading))
+                Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea()
+            }
+            detail(docked: true)
+        }
+        .animation(.snappy, value: model.sidebarVisible)
+    }
+
+    @ViewBuilder
+    private func narrow(width: CGFloat) -> some View {
+        if model.selection == nil {
+            Sidebar()
+        } else {
+            let drawerWidth = min(width * 0.86, 360)
+            let progress = min(max((model.drawerOpen ? 1 : 0) + drag / drawerWidth, 0), 1)
+            ZStack(alignment: .leading) {
+                detail(docked: false)
+
+                // Pulled from the leading edge, as the PWA's edge swipe.
+                // Below the bar, so it never covers the back button.
+                Color.clear
+                    .frame(width: 16)
+                    .frame(maxHeight: .infinity)
+                    .padding(.top, 110)
+                    .contentShape(Rectangle())
+                    .gesture(dragGesture(width: drawerWidth))
+                    .allowsHitTesting(!model.drawerOpen)
+
+                // Taps outside the drawer dismiss it without reaching the chat.
+                Color.black
+                    .opacity(0.45 * progress)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(progress > 0)
+                    .onTapGesture { close() }
+
+                Sidebar()
+                    .frame(width: drawerWidth)
+                    .background(Theme.bg.ignoresSafeArea())
+                    .shadow(color: .black.opacity(0.55 * progress), radius: 40)
+                    .offset(x: -drawerWidth * (1 - progress))
+                    // Simultaneous, so the list still scrolls under a vertical drag.
+                    .simultaneousGesture(dragGesture(width: drawerWidth))
+                    .accessibilityHidden(progress == 0)
+            }
+            .animation(.snappy(duration: 0.22), value: model.drawerOpen)
+        }
+    }
+
+    private func dragGesture(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                // Horizontal intent only: a scroll in the list is not a pull.
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                drag = value.translation.width
+            }
+            .onEnded { value in
+                guard drag != 0 else { return }
+                let predicted = (model.drawerOpen ? 1 : 0) + value.predictedEndTranslation.width / width
+                model.drawerOpen = predicted > 0.5
+                drag = 0
+            }
+    }
+
+    private func close() {
+        model.drawerOpen = false
+    }
+
+    @ViewBuilder
+    private func detail(docked: Bool) -> some View {
+        NavigationStack {
+            if let id = model.selection {
+                ChatView(sessionId: id, docked: docked).id(id)
+            } else {
+                EmptyDetail(docked: docked)
+            }
+        }
+    }
+}
+
+struct EmptyDetail: View {
+    let docked: Bool
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ConnectionBanner()
+            Text("Pick a session or start a new one.")
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.muted)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.bg)
+        .toolbar {
+            if docked, !model.sidebarVisible {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { model.sidebarVisible = true } label: { Image(systemName: "sidebar.left") }
+                }
+            }
+        }
     }
 }
 
@@ -63,11 +196,13 @@ struct ToastView: View {
     var body: some View {
         if let toast = model.toast {
             Text(toast)
-                .font(.footnote)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.text)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(.regularMaterial, in: Capsule())
+                .glassSurface(cornerRadius: 18)
                 .padding(.top, 8)
+                .padding(.horizontal)
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .onTapGesture { model.toast = nil }
                 .task(id: toast) {

@@ -12,40 +12,58 @@ struct MarkdownText: View {
 
     var body: some View {
         let blocks = markdownBlocks(text)
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case let .code(code, language):
                     CodeBlock(code: code, language: language)
-                case let .heading(level, content):
+                case let .heading(_, content):
+                    // Sized off the body: a heading marks a section of one
+                    // answer, not a level of the page.
                     Text(inline(content))
-                        .font(level == 1 ? .title3.bold() : level == 2 ? .headline : .subheadline.bold())
+                        .font(.system(size: 15, weight: .semibold))
                         .padding(.top, 4)
                 case let .quote(content):
                     Text(inline(content))
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 10)
-                        .overlay(alignment: .leading) { Rectangle().fill(.quaternary).frame(width: 3) }
+                        .foregroundStyle(Theme.muted)
+                        .padding(.leading, 12)
+                        .overlay(alignment: .leading) { Rectangle().fill(Color.white.opacity(0.15)).frame(width: 2) }
                 case let .table(content):
                     ScrollView(.horizontal, showsIndicators: false) {
-                        Text(content).font(.system(.caption, design: .monospaced))
+                        Text(content).font(Theme.mono(12.5)).lineSpacing(3)
                     }
                 case .rule:
-                    Divider()
+                    Rectangle().fill(Color.white.opacity(0.15)).frame(height: 1).padding(.vertical, 4)
                 case let .paragraph(content):
                     Text(inline(content))
                 }
             }
         }
+        .font(Theme.body)
+        .lineSpacing(Theme.bodySpacing)
+        .foregroundStyle(Theme.text)
+        .tint(Theme.text)
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Inline markdown, with code spans drawn as in the PWA: monospaced on
+    /// a dark well, and links underlined in the text colour.
     private func inline(_ content: String) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(
             interpretedSyntax: .inlineOnlyPreservingWhitespace, failurePolicy: .returnPartiallyParsedIfPossible
         )
-        return (try? AttributedString(markdown: content, options: options)) ?? AttributedString(content)
+        var result = (try? AttributedString(markdown: content, options: options)) ?? AttributedString(content)
+        for run in result.runs {
+            if let intent = run.inlinePresentationIntent, intent.contains(.code) {
+                result[run.range].font = Theme.mono(13.5) as Font
+                result[run.range].backgroundColor = Theme.well as Color
+            }
+            if run.link != nil {
+                result[run.range].underlineStyle = Text.LineStyle.single
+            }
+        }
+        return result
     }
 }
 
@@ -145,37 +163,34 @@ private func listMarker(_ line: String) -> String {
     return line
 }
 
+/// Code scrolls sideways rather than wrapping into a different program.
+/// The copy button sits outside the scroller so it never moves.
 struct CodeBlock: View {
     let code: String
     let language: String?
-    var tint: Color?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let language {
-                HStack {
-                    Text(language).font(.caption2).foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        UIPasteboard.general.string = code
-                    } label: {
-                        Image(systemName: "doc.on.doc").font(.caption2)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 8)
-                .padding(.top, 6)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(code)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(tint ?? .primary)
-                    .textSelection(.enabled)
-                    .padding(8)
-            }
+        ScrollView(.horizontal, showsIndicators: false) {
+            Text(code)
+                .font(Theme.mono(12.5))
+                .lineSpacing(4)
+                .foregroundStyle(Theme.text)
+                .textSelection(.enabled)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .padding(.trailing, 28)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.well))
+        .overlay(alignment: .topTrailing) {
+            Button {
+                UIPasteboard.general.string = code
+            } label: {
+                Image(systemName: "doc.on.doc").font(.system(size: 12)).frame(width: 26, height: 26)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.muted)
+            .padding(4)
+        }
     }
 }

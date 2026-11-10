@@ -9,31 +9,34 @@ import UIKit
 /// socket.
 struct ChatView: View {
     let sessionId: String
+    /// Beside the list rather than under a drawer.
+    let docked: Bool
     @Environment(AppModel.self) private var model
-    @AppStorage("pios.showStats") private var showStats = true
+    @AppStorage("pios.showStats") private var showStats = false
     @State private var renaming = false
     @State private var newName = ""
     @State private var compacting = false
     @State private var compactNote = ""
-    @State private var picker: SessionPicker? = nil
+    @State private var allModels = false
     @State private var showInfo = false
+    @FocusState private var composing: Bool
 
     var body: some View {
         let view = model.view(sessionId)
         let summary = model.summary(sessionId)
         let cwd = model.cwd(sessionId)
         let isDraft = model.draft(sessionId) != nil && summary == nil
+        let named = sessionTitle(name: summary?.name, cwd: cwd)
+        let title: (String, Bool) = view.presentation.title.map { ($0, false) } ?? (named.text, named.isPath)
+        let state = SessionState.of(summary, running: view.running, interrupting: view.interrupting, blocked: !view.dialogs.isEmpty)
 
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                LazyVStack(alignment: .leading, spacing: Theme.turnGap) {
                     if view.hasOlder {
                         Button("Load earlier messages") { model.client.loadOlderEntries(sessionId) }
-                            .font(.footnote)
+                            .buttonStyle(GhostButtonStyle())
                             .frame(maxWidth: .infinity)
-                    }
-                    if isDraft {
-                        DraftIntro(cwd: cwd ?? "")
                     }
                     ForEach(view.items) { item in
                         TranscriptItem(item: item, view: view, sessionId: sessionId, cwd: cwd)
@@ -49,33 +52,26 @@ struct ChatView: View {
                     }
                     Color.clear.frame(height: 1).id(bottomId)
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
                 .frame(maxWidth: 760)
                 .frame(maxWidth: .infinity)
             }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                SessionBanners(sessionId: sessionId, view: view, summary: summary)
-            }
+            .background(Theme.bg)
+            // The dock floats over the transcript, which reads through it.
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                ComposerView(
-                    sessionId: sessionId,
-                    view: view,
-                    onAction: { action in
-                        switch action {
-                        case let .picker(kind): picker = kind
-                        case .info: showInfo = true
-                        }
-                    },
+                Dock(
+                    sessionId: sessionId, view: view, summary: summary, isDraft: isDraft, composing: $composing,
+                    onAllModels: { allModels = true },
+                    onInfo: { showInfo = true },
                     onSent: { withAnimation { proxy.scrollTo(bottomId, anchor: .bottom) } }
                 )
             }
         }
-        .navigationTitle(view.presentation.title ?? summary?.title ?? (isDraft ? "New session" : "Session"))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { toolbar(view: view, summary: summary, isDraft: isDraft) }
+        .toolbar { toolbar(view: view, summary: summary, isDraft: isDraft, title: title, state: state) }
         .sheet(item: dialogBinding(view)) { request in
             DialogSheet(request: request) { answer in
                 model.client.answerDialog(
@@ -84,14 +80,8 @@ struct ChatView: View {
                 )
             }
         }
-        .sheet(item: $picker) { picker in
-            NavigationStack {
-                switch picker {
-                case .model: ModelPicker(sessionId: sessionId)
-                case .thinking: ThinkingPicker(sessionId: sessionId)
-                }
-            }
-            .presentationDetents([.medium, .large])
+        .sheet(isPresented: $allModels) {
+            NavigationStack { ModelPicker(sessionId: sessionId) }.presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showInfo) {
             NavigationStack { SessionInfoView(sessionId: sessionId) }.presentationDetents([.medium, .large])
@@ -116,8 +106,10 @@ struct ChatView: View {
             guard !isDraft else { return }
             model.client.watch(sessionId)
             model.client.listCommands(sessionId)
+            // The composer's model menu reads this; a draft asks on demand,
+            // because asking starts its agent.
+            model.client.listModels(sessionId)
             if showStats { model.client.requestStats(sessionId) }
-            model.reportActivity()
         }
         .onDisappear {
             if !isDraft { model.client.unwatch(sessionId) }
@@ -137,7 +129,6 @@ struct ChatView: View {
     private func dialogBinding(_ view: SessionView) -> Binding<ExtensionUiRequest?> {
         Binding(
             get: { view.dialogs.first },
-            // Dismissing by swipe is an answer too: the agent is blocked.
             // Read live, not from the snapshot: an answered dialog is already
             // closed and must not be cancelled on the way out.
             set: { value in
@@ -149,47 +140,66 @@ struct ChatView: View {
     }
 
     @ToolbarContentBuilder
-    private func toolbar(view: SessionView, summary: SessionSummary?, isDraft: Bool) -> some ToolbarContent {
-        ToolbarItemGroup(placement: .topBarTrailing) {
+    private func toolbar(view: SessionView, summary: SessionSummary?, isDraft: Bool, title: (String, Bool), state: SessionState) -> some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            if docked {
+                Button { model.sidebarVisible.toggle() } label: { Image(systemName: "sidebar.left") }
+            } else {
+                // Not a pop: the list slides over the chat, which stays put.
+                Button { model.drawerOpen = true } label: { Image(systemName: "chevron.left") }
+            }
+        }
+        ToolbarItem(placement: .principal) {
+            HStack(spacing: 6) {
+                Text(title.0)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                    // A path is cut at the front: its end tells two apart.
+                    .truncationMode(title.1 ? .head : .tail)
+                StatusMark(state: state).font(.system(size: 13))
+            }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
             Menu {
-                Button { picker = .model } label: {
-                    Label(summary?.model?.name ?? "Model", systemImage: "cpu")
-                }
-                if !(summary?.thinkingLevels.isEmpty ?? true) {
-                    Button { picker = .thinking } label: {
-                        Label("Thinking: \(summary?.thinkingLevel ?? "default")", systemImage: "brain")
+                Section {
+                    Button { model.pickerStart = model.cwd(sessionId) ?? "" } label: {
+                        Label("New session", systemImage: "plus")
                     }
                 }
                 if !isDraft {
-                    Divider()
-                    Button { newName = summary?.name ?? ""; renaming = true } label: { Label("Rename", systemImage: "pencil") }
-                    Button { compactNote = ""; compacting = true } label: {
-                        Label("Compact", systemImage: "rectangle.compress.vertical")
-                    }
-                    if let text = view.lastAssistantText {
-                        Button { UIPasteboard.general.string = text; model.toast = "Copied last reply" } label: {
-                            Label("Copy last reply", systemImage: "doc.on.doc")
+                    Section {
+                        Button { newName = summary?.name ?? ""; renaming = true } label: { Label("Rename", systemImage: "pencil") }
+                        Button { compactNote = ""; compacting = true } label: {
+                            Label("Compact", systemImage: "rectangle.compress.vertical")
+                        }
+                        Button { model.client.reload(sessionId) } label: {
+                            Label("Reload", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(view.running)
+                        Button { model.client.exportSession(sessionId) } label: {
+                            Label("Export HTML", systemImage: "square.and.arrow.up")
                         }
                     }
-                    Button { showInfo = true } label: { Label("Session info", systemImage: "info.circle") }
-                    Button { model.client.reload(sessionId) } label: {
-                        Label("Reload extensions", systemImage: "arrow.clockwise")
-                    }
-                    .disabled(view.running)
-                    Button { model.client.exportSession(sessionId) } label: {
-                        Label("Export HTML", systemImage: "square.and.arrow.up")
+                    Section {
+                        if let text = view.lastAssistantText {
+                            Button { UIPasteboard.general.string = text; model.toast = "Copied last reply" } label: {
+                                Label("Copy last reply", systemImage: "doc.on.doc")
+                            }
+                        }
+                        Button { showInfo = true } label: { Label("Session info", systemImage: "info.circle") }
+                        if let summary, !summary.trusted {
+                            Button { model.client.setSessionTrust(sessionId, true) } label: {
+                                Label("Trust this directory", systemImage: "checkmark.shield")
+                            }
+                        }
                     }
                 }
             } label: {
-                Image(systemName: "ellipsis.circle")
+                Image(systemName: "ellipsis")
             }
         }
     }
-}
-
-enum SessionPicker: String, Identifiable {
-    case model, thinking
-    var id: String { rawValue }
 }
 
 extension AppModel {
@@ -209,16 +219,79 @@ extension AppModel {
     }
 }
 
-struct DraftIntro: View {
-    let cwd: String
+/// Everything that floats over the bottom of the transcript: status lines,
+/// extension chips and widgets, and the composer. Ambient parts fold away
+/// while typing, as in the PWA.
+struct Dock: View {
+    let sessionId: String
+    let view: SessionView
+    let summary: SessionSummary?
+    let isDraft: Bool
+    var composing: FocusState<Bool>.Binding
+    var onAllModels: () -> Void
+    var onInfo: () -> Void
+    var onSent: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("New session").font(.headline)
-            Label(collapseHome(cwd), systemImage: "folder").font(.subheadline).foregroundStyle(.secondary)
-            Text("The session starts with your first prompt.").font(.footnote).foregroundStyle(.secondary)
+        VStack(spacing: 8) {
+            SessionBanners(sessionId: sessionId, view: view, summary: summary)
+            if !composing.wrappedValue {
+                ExtensionStatus(presentation: view.presentation, placement: "aboveEditor")
+            }
+            ComposerView(
+                sessionId: sessionId, view: view, summary: summary, isDraft: isDraft, focused: composing,
+                onAllModels: onAllModels, onInfo: onInfo, onSent: onSent
+            )
+            if !composing.wrappedValue {
+                ExtensionStatus(presentation: view.presentation, placement: "belowEditor", chips: false)
+            }
         }
-        .padding(.vertical, 24)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity)
+        .animation(.snappy(duration: 0.18), value: composing.wrappedValue)
+    }
+}
+
+/// Extension status chips and widgets for one slot. pi defaults an unplaced
+/// widget above the editor.
+struct ExtensionStatus: View {
+    let presentation: SessionPresentation
+    let placement: String
+    var chips = true
+
+    var body: some View {
+        let widgets = presentation.widgets.filter { ($0.placement ?? "aboveEditor") == placement }
+        if chips, !presentation.status.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(presentation.status, id: \.key) { item in
+                        Text(item.text)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.muted)
+                            .lineLimit(1)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .glassSurface(cornerRadius: 999)
+                    }
+                }
+                .padding(.horizontal, 4)
+            }
+        }
+        ForEach(widgets, id: \.key) { widget in
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(widget.lines.enumerated()), id: \.offset) { _, line in
+                    Text(line).lineLimit(1)
+                }
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(Theme.muted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .glassSurface(cornerRadius: Theme.radius)
+        }
     }
 }
 
@@ -228,33 +301,27 @@ struct WorkingIndicator: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            ProgressView().controlSize(.small)
+            ProgressView().controlSize(.mini).tint(Theme.muted)
             Text(blocked ? "Waiting for your answer" : interrupting ? "Stopping..." : "Working...")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.muted)
         }
     }
 }
 
+/// Accounting, not conversation: it sits under the last turn and stays quiet.
 struct StatsFooter: View {
     let stats: SessionStats
 
     var body: some View {
         HStack(spacing: 12) {
-            if let percent = stats.contextPercent {
-                Label("\(Int(percent.rounded()))% context", systemImage: "gauge.with.dots.needle.33percent")
-            }
-            if let total = stats.tokensTotal { Label(compactNumber(total), systemImage: "number") }
-            if let cost = stats.cost, cost > 0 { Label(String(format: "$%.2f", cost), systemImage: "dollarsign.circle") }
+            if let percent = stats.contextPercent { Text("\(Int(percent.rounded()))% context") }
+            if let total = stats.tokensTotal { Text("\(compactNumber(total)) tokens") }
+            if let cost = stats.cost, cost > 0 { Text(String(format: "$%.2f", cost)) }
         }
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .center)
+        .font(.system(size: 12))
+        .foregroundStyle(Theme.muted)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
     }
-}
-
-func compactNumber(_ value: Double) -> String {
-    if value >= 1_000_000 { return String(format: "%.1fM", value / 1_000_000) }
-    if value >= 1_000 { return String(format: "%.1fk", value / 1_000) }
-    return String(Int(value))
 }

@@ -39,15 +39,15 @@ struct ImageContentView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(maxHeight: maxHeight)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .onTapGesture { zoomed = true }
             } else if failed {
                 Label("Image unavailable", systemImage: "photo.badge.exclamationmark")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.muted)
             } else {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(.quaternary)
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Theme.hover)
                     .aspectRatio(aspect, contentMode: .fit)
                     .frame(maxHeight: min(maxHeight, 160))
                     .overlay(ProgressView())

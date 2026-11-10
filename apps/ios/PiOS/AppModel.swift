@@ -32,7 +32,16 @@ final class AppModel {
     /// Models, commands and stats arrived.
     private(set) var metadataRevision = 0
     private(set) var drafts: [String: Draft] = [:]
-    var selection: String?
+    private(set) var selection: String?
+    /// The session list over the chat, on a narrow screen.
+    var drawerOpen = false
+    /// The docked list beside the chat, on a wide one.
+    var sidebarVisible = true
+    var showSettings = false
+    /// Where the directory picker starts; non-nil shows it.
+    var pickerStart: String?
+    /// Last `updatedAt` seen per session, for the unread mark.
+    private(set) var seen: [String: Double] = [:]
     var toast: String?
     var showPairing = false
     var pairingNotice: String?
@@ -74,6 +83,7 @@ final class AppModel {
         }
         monitor.start(queue: DispatchQueue(label: "pios.network"))
 
+        seen = readVersioned(storage, seenKey, version: 1, fallback: [String: Double]())
         connectActiveMachine()
         startActivityReports()
     }
@@ -106,6 +116,7 @@ final class AppModel {
         machines.activeId = machine.id
         saveMachines()
         selection = nil
+        seen = readVersioned(storage, seenKey, version: 1, fallback: [String: Double]())
         connectActiveMachine()
     }
 
@@ -155,7 +166,41 @@ final class AppModel {
         let id = client.newSessionId()
         drafts[id] = Draft(sessionId: id, cwd: cwd, trustProject: trustProject)
         saveDrafts()
-        selection = id
+        open(id)
+    }
+
+    /// Opens a session; on a phone that also puts the list away.
+    func open(_ sessionId: String?) {
+        selection = sessionId
+        drawerOpen = false
+        if let sessionId, let summary = summary(sessionId) { markSeen(summary) }
+        reportActivity()
+    }
+
+    // MARK: Unread
+
+    private var seenKey: String { "pios.seen.\(activeMachine?.id ?? "none")" }
+
+    /// Finished while the user was elsewhere. A session never seen on this
+    /// device is not unread: the first sync seeds every row as read.
+    func isUnseen(_ summary: SessionSummary) -> Bool {
+        guard let at = seen[summary.sessionId] else { return false }
+        return at < summary.updatedAt
+    }
+
+    private func markSeen(_ summary: SessionSummary) {
+        guard seen[summary.sessionId] != summary.updatedAt else { return }
+        seen[summary.sessionId] = summary.updatedAt
+        writeVersioned(storage, seenKey, version: 1, seen)
+    }
+
+    private func seedSeen(_ sessions: [SessionSummary]) {
+        var changed = false
+        for summary in sessions where seen[summary.sessionId] == nil {
+            seen[summary.sessionId] = summary.updatedAt
+            changed = true
+        }
+        if changed { writeVersioned(storage, seenKey, version: 1, seen) }
     }
 
     func draft(_ sessionId: String) -> Draft? { drafts[sessionId] }
@@ -235,6 +280,9 @@ final class AppModel {
             saveDrafts()
         }
         if state.transport == .connected, !wasConnected { reportActivity() }
+        if state.transport == .connected, state.sync != .syncing { seedSeen(state.sessions) }
+        // The open session is being read, so whatever it did is seen.
+        if let selection, let open = state.sessions.first(where: { $0.sessionId == selection }) { markSeen(open) }
         if state.transport == .blocked, state.reason == "unauthorized" { Task { await checkRevoked() } }
     }
 
@@ -251,7 +299,7 @@ final class AppModel {
         case let .commandError(message):
             toast = message
         case let .rewound(branch, _):
-            selection = branch
+            open(branch)
             client.refreshSessions()
         case let .exported(_, path):
             toast = "Exported to \(collapseHome(path))"

@@ -29,7 +29,7 @@ struct ModelPicker: View {
                     HStack {
                         VStack(alignment: .leading) {
                             Text(option.name)
-                            Text(option.id).font(.caption).foregroundStyle(.secondary)
+                            Text(option.id).font(.caption).foregroundStyle(Theme.muted)
                         }
                         Spacer()
                         if option.id == current?.id { Image(systemName: "checkmark") }
@@ -42,6 +42,7 @@ struct ModelPicker: View {
             }
         }
         .searchable(text: $query)
+        .themedList()
         .navigationTitle("Model")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -73,6 +74,7 @@ struct ThinkingPicker: View {
             }
             .foregroundStyle(.primary)
         }
+        .themedList()
         .navigationTitle("Thinking")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -116,6 +118,7 @@ struct SessionInfoView: View {
                 }
             }
         }
+        .themedList()
         .navigationTitle("Session")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
