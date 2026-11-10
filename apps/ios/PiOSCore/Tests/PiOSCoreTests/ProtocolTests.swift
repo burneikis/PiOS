@@ -86,6 +86,16 @@ final class WireTests: XCTestCase {
         guard case .unhandled("something_newer") = frame.body else { return XCTFail("\(frame.body)") }
     }
 
+    func testNotificationFramesRoundTrip() throws {
+        let frame = try ServerFrame(
+            text: #"{"v":2,"type":"notification","id":"n1","sessionId":"s","title":"repo","body":"Done.","tag":"session:s","at":5}"#
+        )
+        guard case let .notification(note) = frame.body else { return XCTFail("\(frame.body)") }
+        XCTAssertEqual(note, DeviceNotification(id: "n1", sessionId: "s", title: "repo", body: "Done.", tag: "session:s", at: 5))
+        XCTAssertEqual(ClientCommand.setNotifications(enabled: true).frame(commandId: "c")["enabled"], .bool(true))
+        XCTAssertEqual(ClientCommand.ackNotifications(ids: ["n1"]).frame(commandId: "c")["ids"], .array(["n1"]))
+    }
+
     func testLineSeparatorsSurviveParsing() throws {
         let text = "{\"v\":2,\"type\":\"exported\",\"sessionId\":\"s\",\"path\":\"a\u{2028}b\u{2029}c\"}"
         let frame = try ServerFrame(text: text)

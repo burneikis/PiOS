@@ -17,6 +17,7 @@ import {
 import type { AuthStore, DeviceRecord } from "./auth.ts";
 import type { CommandLedger } from "./dedupe.ts";
 import type { ImageStore } from "./image-store.ts";
+import type { InboxItem, NotificationInbox } from "./inbox.ts";
 import { SERVER_VERSION } from "./config.ts";
 import { listSessions, liveSummary, summaryFor } from "./sessions.ts";
 import type { Terminal, TerminalHost, TerminalListener } from "./terminals.ts";
@@ -47,6 +48,8 @@ export interface ConnectionDeps {
   images?: ImageStore;
   /** Interactive shells. Absent means this daemon offers none. */
   terminals?: TerminalHost;
+  /** Notifications for devices no push service can reach. */
+  inbox?: NotificationInbox;
 }
 
 /**
@@ -129,6 +132,7 @@ export class Connection {
       // for on every handshake; this is only what is running right now.
       sessions: this.deps.registry.list().map((info) => liveSummary(info)),
     });
+    this.sendPendingNotifications();
   }
 
   private async dispatch(frame: Exclude<ClientFrame, { type: "hello" }>): Promise<void> {
@@ -178,6 +182,13 @@ export class Connection {
         return this.answerDialog(frame);
       case "activity":
         return this.recordActivity(frame);
+      case "set_notifications":
+        this.deps.inbox?.setEnabled(this.device!.id, frame.enabled);
+        this.ack(frame.commandId);
+        return this.sendPendingNotifications();
+      case "ack_notifications":
+        this.deps.inbox?.acknowledge(this.device!.id, frame.ids);
+        return this.ack(frame.commandId);
       case "terminal_open":
         return this.openTerminal(frame);
       case "terminal_input":
@@ -768,6 +779,17 @@ export class Connection {
           session.id,
         ) ?? liveSummary(session.info),
     });
+  }
+
+  /** One settled turn, live. The inbox keeps it until the device acks. */
+  sendNotification(item: InboxItem): void {
+    if (!this.device) return;
+    this.send({ v: WIRE_VERSION, type: "notification", ...item });
+  }
+
+  private sendPendingNotifications(): void {
+    if (!this.device || !this.deps.inbox) return;
+    for (const item of this.deps.inbox.pending(this.device.id)) this.sendNotification(item);
   }
 
   private ack(commandId: string, duplicate = false): void {

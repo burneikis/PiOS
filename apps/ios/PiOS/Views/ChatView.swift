@@ -132,7 +132,15 @@ struct ChatView: View {
             model.client.listModels(sessionId)
             if showStats { model.client.requestStats(sessionId) }
         }
+        // Anything laid over the chat takes the keyboard down first. Left up,
+        // SwiftUI restores focus on the way back while the bar is still
+        // animating, and the keyboard lands over the composer instead of
+        // pushing it up.
+        .onChange(of: covered) { _, covered in
+            if covered { dismissKeyboard() }
+        }
         .onDisappear {
+            dismissKeyboard()
             // A screen pushed over the chat hides it without leaving the
             // session; only a new selection ends the subscription.
             if !isDraft, model.selection != sessionId { model.client.unwatch(sessionId) }
@@ -143,6 +151,16 @@ struct ChatView: View {
     }
 
     private let bottomId = "bottom"
+
+    private var covered: Bool {
+        !model.path.isEmpty || model.drawerOpen || model.showSettings || model.pickerStart != nil
+            || allModels || showInfo
+    }
+
+    private func dismissKeyboard() {
+        composing = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
 
     private func isIdleTail(_ item: ViewItem) -> Bool {
         if case .streaming = item { return false }

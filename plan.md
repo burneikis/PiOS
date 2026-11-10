@@ -443,7 +443,10 @@ Two things worth carrying forward:
    the device's push subscriptions with its token.
 3. Notification content: session name, last tool, elapsed.
 4. Turns finished in the TUI are pushed too, read from the session file.
-5. Remaining: APNs for native (Phase 10), and richer content than one line.
+5. Native without APNs: a per-device inbox on the daemon (`set_notifications`,
+   `notification`, `ack_notifications`), drained by the iOS app live, on
+   reconnect, and on background refresh. Remaining: APNs for a paid-signed
+   build, and richer content than one line.
 
 ---
 

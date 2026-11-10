@@ -277,6 +277,14 @@ export const ClientFrameSchema = z.discriminatedUnion("type", [
     appState: z.enum(["active", "inactive", "background"]),
     sessionIds: z.array(z.string()).default([]),
   }),
+  /**
+   * Opts this device into notifications over the socket, for a client that
+   * no push service can wake. Kept on the daemon per device, so it outlives
+   * the connection; what arrives while the device is away waits for it.
+   */
+  Envelope({ type: z.literal("set_notifications"), enabled: z.boolean() }),
+  /** Shown to the user; the daemon stops resending them. */
+  Envelope({ type: z.literal("ack_notifications"), ids: z.array(z.string()).max(100) }),
 ]);
 export type ClientFrame = z.infer<typeof ClientFrameSchema>;
 
@@ -566,6 +574,19 @@ export const ServerFrameSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
     leafId: z.string().nullable(),
     reason: z.string(),
+  }),
+  /**
+   * A settled turn, for a device that opted in with `set_notifications`.
+   * Resent on every connect until acknowledged, so `id` is what dedupes.
+   */
+  ServerEnvelope({
+    type: z.literal("notification"),
+    id: z.string(),
+    sessionId: z.string(),
+    title: z.string(),
+    body: z.string(),
+    tag: z.string(),
+    at: z.number(),
   }),
 ]);
 export type ServerFrame = z.infer<typeof ServerFrameSchema>;

@@ -2,7 +2,8 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { AuthStore } from "./auth.ts";
-import { authStorePath, defaultConfig, pushStorePath, relayKeyPath } from "./config.ts";
+import { authStorePath, defaultConfig, inboxStorePath, pushStorePath, relayKeyPath } from "./config.ts";
+import { NotificationInbox } from "./inbox.ts";
 import { PushStore } from "./push.ts";
 import { advertisedEndpoint } from "./endpoints.ts";
 import { enrollAtRelay, RelayRejectedError } from "./relay-connector.ts";
@@ -97,15 +98,20 @@ function revoke(deviceId: string | undefined): void {
   // A revoked device must also stop being reachable by push: the endpoint is a
   // capability that outlives the token otherwise.
   const push = new PushStore(pushStorePath(config), config.pushSubject);
+  const inbox = new NotificationInbox(inboxStorePath(config));
 
   if (deviceId === "--all") {
     const ids = auth.revokeAll();
-    for (const id of ids) push.removeDevice(id);
+    for (const id of ids) {
+      push.removeDevice(id);
+      inbox.removeDevice(id);
+    }
     console.log(ids.length === 0 ? "no paired devices" : `revoked ${ids.length} device(s)`);
     return;
   }
 
   push.removeDevice(deviceId);
+  inbox.removeDevice(deviceId);
   console.log(auth.revoke(deviceId) ? `revoked ${deviceId}` : `no device ${deviceId}`);
 }
 
