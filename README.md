@@ -17,7 +17,7 @@ catches up when it comes back.
 </p>
 
 > **Status:** early. Built for Linux hosts and an iPhone; expect rough edges.
-> A native app is not built yet.
+> A native SwiftUI app lives in [apps/ios](apps/ios/README.md), on the same daemon.
 
 ## Features
 
@@ -110,6 +110,7 @@ repositories. See [packages/sandbox/README.md](packages/sandbox/README.md).
 | Path | What |
 |---|---|
 | `apps/web` | The PWA (React) |
+| `apps/ios` | Native SwiftUI app and `PiOSCore`, a Swift port of `client-core` |
 | `packages/server` | `pios-server`: daemon, HTTP/WS routes, auth, git, files, push |
 | `packages/pi-host` | Runs and supervises pi sessions over RPC |
 | `packages/protocol` | Wire types and JSONL framing shared by every part |

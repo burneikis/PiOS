@@ -449,6 +449,12 @@ Two things worth carrying forward:
 
 ## Phase 10 - `apps/mobile` (Expo)
 
+Superseded on the `native-ios` branch by a native SwiftUI app in `apps/ios`
+(see its README): `PiOSCore` ports `protocol` + `client-core` to Swift and is
+tested against the same `spikes/traces` fixtures and a live sandbox daemon.
+Open there: files, git and terminal views, APNs, Live Activity. The Expo
+plan below is kept for reference.
+
 Only worth starting once the PWA is a daily driver and web push has proven the
 notification model.
 

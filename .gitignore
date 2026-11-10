@@ -10,3 +10,9 @@ spikes/.trust-sandbox/
 .wrangler/
 .dev.vars
 spikes/.retry-agent/
+apps/ios/*.xcodeproj/
+apps/ios/PiOS/Info.plist
+apps/ios/PiOSCore/.build/
+apps/ios/PiOSCore/.swiftpm/
+apps/ios/build/
+apps/ios/e2e/.build/

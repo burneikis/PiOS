@@ -15,6 +15,7 @@ pnpm test
 pnpm -F <pkg> dev
 pnpm sandbox                  # live app + fake agent, prints a URL that pairs itself
 pnpm sandbox:shot --tap api   # phone-sized screenshots into .sandbox/shots
+swift test --package-path apps/ios/PiOSCore   # Swift core of the iOS app
 ```
 
 UI work goes through the sandbox (`packages/sandbox/README.md`): real daemon,
