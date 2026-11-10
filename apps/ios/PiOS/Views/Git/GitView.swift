@@ -156,7 +156,6 @@ struct GitView: View {
             }
         }
         .gitConfirmation($confirming, git: git)
-        .navigationDestination(for: GitDetailView.Subject.self) { GitDetailView(git: git, subject: $0) }
         .task { await git.refresh() }
     }
 

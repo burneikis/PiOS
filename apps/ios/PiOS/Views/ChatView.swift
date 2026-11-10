@@ -20,7 +20,6 @@ struct ChatView: View {
     @State private var allModels = false
     @State private var showInfo = false
     @FocusState private var composing: Bool
-    @State private var route: ChatRoute? = nil
 
     var body: some View {
         let view = model.view(sessionId)
@@ -73,18 +72,18 @@ struct ChatView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar(view: view, summary: summary, isDraft: isDraft, title: title, state: state) }
-        .navigationDestination(item: $route) { route in
+        // Every pushed screen is declared here, at the stack's root, so no
+        // destination depends on a pushed view staying alive.
+        .navigationDestination(for: ChatRoute.self) { route in
             switch route {
             case .git:
                 GitView(git: model.git(sessionId))
-            case .files:
-                FilesView(project: model.project(sessionId), root: cwd ?? "")
-                    .navigationDestination(for: FileRoute.self) { next in
-                        switch next {
-                        case let .directory(path): FilesView(project: model.project(sessionId), root: cwd ?? "", path: path)
-                        case let .file(path): FileEditorView(project: model.project(sessionId), path: path)
-                        }
-                    }
+            case let .gitDetail(subject):
+                GitDetailView(git: model.git(sessionId), subject: subject)
+            case let .files(path):
+                FilesView(project: model.project(sessionId), root: cwd ?? "", path: path)
+            case let .file(path):
+                FileEditorView(project: model.project(sessionId), path: path)
             case .terminal:
                 // One shell per session, shared by every device.
                 TerminalScreen(terminalId: sessionId, cwd: cwd ?? "")
@@ -134,7 +133,9 @@ struct ChatView: View {
             if showStats { model.client.requestStats(sessionId) }
         }
         .onDisappear {
-            if !isDraft { model.client.unwatch(sessionId) }
+            // A screen pushed over the chat hides it without leaving the
+            // session; only a new selection ends the subscription.
+            if !isDraft, model.selection != sessionId { model.client.unwatch(sessionId) }
         }
         .onChange(of: view.running) { _, running in
             if !running, showStats, !isDraft { model.client.requestStats(sessionId) }
@@ -183,14 +184,14 @@ struct ChatView: View {
             }
         }
         ToolbarItem(placement: .topBarTrailing) {
-            GitChip(git: model.git(sessionId)) { route = .git }
+            GitChip(git: model.git(sessionId)) { model.path.append(.git) }
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 Section {
-                    Button { route = .files } label: { Label("Files", systemImage: "doc") }
+                    Button { model.path.append(.files(nil)) } label: { Label("Files", systemImage: "doc") }
                     if model.cwd(sessionId) != nil {
-                        Button { route = .terminal } label: { Label("Terminal", systemImage: "terminal") }
+                        Button { model.path.append(.terminal) } label: { Label("Terminal", systemImage: "terminal") }
                     }
                     Button { model.pickerStart = model.cwd(sessionId) ?? "" } label: {
                         Label("New session", systemImage: "plus")
@@ -231,8 +232,13 @@ struct ChatView: View {
     }
 }
 
+/// A screen over the chat. `files(nil)` is the project root.
 enum ChatRoute: Hashable {
-    case git, files, terminal
+    case git
+    case gitDetail(GitDetailView.Subject)
+    case files(String?)
+    case file(String)
+    case terminal
 }
 
 extension AppModel {

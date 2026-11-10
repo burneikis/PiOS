@@ -40,7 +40,7 @@ struct ChangesTab: View {
             Section {
                 if staged.isEmpty { empty("Nothing staged.") }
                 ForEach(staged, id: \.path) { file in
-                    NavigationLink(value: GitDetailView.Subject.file(path: file.path, staged: true)) { FileRowView(file: file) }
+                    NavigationLink(value: ChatRoute.gitDetail(.file(path: file.path, staged: true))) { FileRowView(file: file) }
                         .swipeActions {
                             Button("Unstage") { run(.unstage([file.path])) }.tint(Theme.muted)
                         }
@@ -53,7 +53,7 @@ struct ChangesTab: View {
             Section {
                 if changed.isEmpty { empty("Working tree clean.") }
                 ForEach(changed, id: \.path) { file in
-                    NavigationLink(value: GitDetailView.Subject.file(path: file.path, staged: false)) { FileRowView(file: file) }
+                    NavigationLink(value: ChatRoute.gitDetail(.file(path: file.path, staged: false))) { FileRowView(file: file) }
                         .swipeActions {
                             Button("Stage") { run(.stage([file.path])) }.tint(Theme.ok)
                             if file.unmerged != true {
@@ -124,7 +124,7 @@ struct HistoryTab: View {
         List {
             if let error { empty(error, color: Theme.error) }
             ForEach(commits) { commit in
-                NavigationLink(value: GitDetailView.Subject.commit(commit)) {
+                NavigationLink(value: ChatRoute.gitDetail(.commit(commit))) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(commit.subject.isEmpty ? "(no subject)" : commit.subject)
                             .font(.system(size: 14)).foregroundStyle(Theme.text).lineLimit(2)
@@ -309,7 +309,7 @@ struct StashesTab: View {
             if let stashes {
                 if stashes.isEmpty { empty("No stashes.") }
                 ForEach(stashes) { stash in
-                    NavigationLink(value: GitDetailView.Subject.stash(stash)) {
+                    NavigationLink(value: ChatRoute.gitDetail(.stash(stash))) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(stash.title).font(.system(size: 14)).foregroundStyle(Theme.text).lineLimit(2)
                             Text("\(stash.ref)\(stash.branch.map { " \u{00B7} on \($0)" } ?? "") \u{00B7} \(listTime(stash.at))")

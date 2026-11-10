@@ -18,6 +18,28 @@ struct Sidebar: View {
             List {
                 let drafts = model.drafts.values.sorted { $0.sessionId > $1.sessionId }
                 if query.isEmpty {
+                    // In the list itself, not only in the bar: a crowded or
+                    // collapsed toolbar must not hide the way to start.
+                    Button(action: newSession) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Theme.accent)
+                                .frame(width: 18)
+                            Text("New session")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(Theme.text)
+                            Spacer()
+                        }
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+
                     ForEach(drafts, id: \.sessionId) { draft in
                         row(id: draft.sessionId) {
                             SessionRow(title: "New session", subtitle: shortPath(draft.cwd), state: SessionState(tone: .cold, label: "draft"))
@@ -81,9 +103,9 @@ struct Sidebar: View {
                         }
                     }
                 }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { model.showSettings = true } label: { Image(systemName: "slider.horizontal.3") }
-                    Button { model.pickerStart = "" } label: { Image(systemName: "plus") }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: newSession) { Image(systemName: "square.and.pencil") }
+                        .accessibilityLabel("New session")
                 }
             }
             .alert("Rename session", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
@@ -96,6 +118,12 @@ struct Sidebar: View {
                 Button("Cancel", role: .cancel) { renaming = nil }
             }
         }
+    }
+
+    /// Starts in the open session's directory, as the chat menu does: a
+    /// second agent on the same project is the common case.
+    private func newSession() {
+        model.pickerStart = model.selection.flatMap { model.cwd($0) } ?? ""
     }
 
     private func row<Content: View>(id: String, @ViewBuilder content: () -> Content) -> some View {

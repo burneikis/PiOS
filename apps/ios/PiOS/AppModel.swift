@@ -33,6 +33,11 @@ final class AppModel {
     private(set) var metadataRevision = 0
     private(set) var drafts: [String: Draft] = [:]
     private(set) var selection: String?
+    /// Screens pushed over the open chat. One typed path for the whole
+    /// stack: mixing item-bound and value-bound destinations leaves SwiftUI
+    /// popping the wrong screen. Belongs to the selection, so it resets
+    /// with it.
+    var path: [ChatRoute] = []
     /// The session list over the chat, on a narrow screen.
     var drawerOpen = false
     /// The docked list beside the chat, on a wide one.
@@ -119,6 +124,7 @@ final class AppModel {
         machines.activeId = machine.id
         saveMachines()
         selection = nil
+        path = []
         seen = readVersioned(storage, seenKey, version: 1, fallback: [String: Double]())
         connectActiveMachine()
     }
@@ -131,6 +137,7 @@ final class AppModel {
         if machines.activeId == machine.id { machines.activeId = machines.machines.first?.id }
         saveMachines()
         selection = nil
+        path = []
         connectActiveMachine()
     }
 
@@ -174,6 +181,7 @@ final class AppModel {
 
     /// Opens a session; on a phone that also puts the list away.
     func open(_ sessionId: String?) {
+        if sessionId != selection { path = [] }
         selection = sessionId
         drawerOpen = false
         if let sessionId, let summary = summary(sessionId) { markSeen(summary) }

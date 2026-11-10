@@ -21,14 +21,14 @@ struct FilesView: View {
             if let error { empty(error, color: Theme.error) }
             if !query.isEmpty {
                 ForEach(matches, id: \.self) { match in
-                    NavigationLink(value: FileRoute.file(absolute(match))) {
+                    NavigationLink(value: ChatRoute.file(absolute(match))) {
                         fileRow(name: (match as NSString).lastPathComponent, detail: (match as NSString).deletingLastPathComponent, dir: false)
                     }
                 }
                 if matches.isEmpty { empty("No matching files.") }
             } else if let listing {
                 ForEach(listing.entries) { entry in
-                    NavigationLink(value: entry.dir == true ? FileRoute.directory(entry.path) : FileRoute.file(entry.path)) {
+                    NavigationLink(value: entry.dir == true ? ChatRoute.files(entry.path) : ChatRoute.file(entry.path)) {
                         fileRow(name: entry.name, detail: nil, dir: entry.dir == true)
                     }
                 }
@@ -86,11 +86,6 @@ struct FilesView: View {
         guard !Task.isCancelled else { return }
         matches = (try? await api.findFiles(project, query: query, limit: 60).files) ?? []
     }
-}
-
-enum FileRoute: Hashable {
-    case directory(String)
-    case file(String)
 }
 
 func fileSymbol(_ name: String) -> String {

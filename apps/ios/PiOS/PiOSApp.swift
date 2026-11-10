@@ -120,14 +120,18 @@ struct Workspace: View {
                 detail(docked: false)
 
                 // Pulled from the leading edge, as the PWA's edge swipe.
-                // Below the bar, so it never covers the back button.
-                Color.clear
-                    .frame(width: 16)
-                    .frame(maxHeight: .infinity)
-                    .padding(.top, 110)
-                    .contentShape(Rectangle())
-                    .gesture(dragGesture(width: drawerWidth))
-                    .allowsHitTesting(!model.drawerOpen)
+                // Below the bar, so it never covers the back button, and
+                // only on the chat itself: over a pushed screen the edge
+                // belongs to the system's swipe back.
+                if model.path.isEmpty {
+                    Color.clear
+                        .frame(width: 16)
+                        .frame(maxHeight: .infinity)
+                        .padding(.top, 110)
+                        .contentShape(Rectangle())
+                        .gesture(dragGesture(width: drawerWidth))
+                        .allowsHitTesting(!model.drawerOpen)
+                }
 
                 // Taps outside the drawer dismiss it without reaching the chat.
                 Color.black
@@ -170,7 +174,8 @@ struct Workspace: View {
 
     @ViewBuilder
     private func detail(docked: Bool) -> some View {
-        NavigationStack {
+        @Bindable var model = model
+        NavigationStack(path: $model.path) {
             if let id = model.selection {
                 ChatView(sessionId: id, docked: docked).id(id)
             } else {
