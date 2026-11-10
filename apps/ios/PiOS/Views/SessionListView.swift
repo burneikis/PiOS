@@ -177,7 +177,7 @@ struct ConnectionBanner: View {
         }
     }
 
-    private func describe(_ state: SupervisorState) -> (text: String, tone: StatusLine.Tone)? {
+    private func describe(_ state: SupervisorState) -> (text: String, tone: StatusTone)? {
         switch state.transport {
         case .connected: return state.sync == .error ? ("Connected, but out of sync.", .warn) : nil
         case .offline: return ("Offline. Prompts wait in the outbox.", .warn)
@@ -190,11 +190,13 @@ struct ConnectionBanner: View {
     }
 }
 
+/// How loud a status line is. Outside `StatusLine`, which is generic.
+enum StatusTone { case muted, warn, error }
+
 /// The PWA's `.banner`: a status line, not a panel. The tone is in the text.
 struct StatusLine<Actions: View>: View {
-    enum Tone { case muted, warn, error }
     let text: String
-    var tone: Tone = .muted
+    var tone: StatusTone = .muted
     @ViewBuilder var actions: Actions
 
     var body: some View {
@@ -225,7 +227,7 @@ struct StatusLine<Actions: View>: View {
 }
 
 extension StatusLine where Actions == EmptyView {
-    init(text: String, tone: Tone = .muted) {
+    init(text: String, tone: StatusTone = .muted) {
         self.init(text: text, tone: tone) { EmptyView() }
     }
 }
