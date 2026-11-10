@@ -252,9 +252,14 @@ struct PatchView: View {
             Text("No changes to show.").font(.system(size: 13)).foregroundStyle(Theme.muted)
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                // Not lazy: a lazy stack offers each line the visible width,
+                // which wraps it instead of scrolling it.
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                        Text(line.text.isEmpty ? " " : line.text).foregroundStyle(color(line.kind))
+                        Text(line.text.isEmpty ? " " : line.text)
+                            .foregroundStyle(color(line.kind))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
                 .font(Theme.mono(11.5))

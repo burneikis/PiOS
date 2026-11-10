@@ -140,6 +140,8 @@ struct DiffView: View {
                 ForEach(Array(lines.prefix(400).enumerated()), id: \.offset) { _, line in
                     Text(prefix(line.kind) + line.text)
                         .foregroundStyle(color(line.kind))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
                 if lines.count > 400 {
                     Text("... \(lines.count - 400) more lines").foregroundStyle(Theme.muted)
