@@ -1,5 +1,6 @@
 import PiOSCore
 import SwiftUI
+import UIKit
 
 @main
 struct PiOSApp: App {
@@ -51,8 +52,21 @@ struct RootView: View {
         )) { start in
             NavigationStack { DirectoryPicker(start: start.path.isEmpty ? nil : start.path) }
         }
+        .sheet(item: $model.sharedFile) { file in
+            ShareSheet(items: [file.url]).ignoresSafeArea()
+        }
         .overlay(alignment: .top) { ToastView() }
     }
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
 private struct PickerStart: Identifiable {

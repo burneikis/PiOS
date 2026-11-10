@@ -82,8 +82,8 @@ final class WireTests: XCTestCase {
     }
 
     func testUnknownFrameTypeIsKeptNotThrown() throws {
-        let frame = try ServerFrame(text: #"{"v":2,"type":"terminal_output","terminalId":"t","offset":0,"data":"x"}"#)
-        guard case .unhandled("terminal_output") = frame.body else { return XCTFail("\(frame.body)") }
+        let frame = try ServerFrame(text: #"{"v":2,"type":"something_newer","x":1}"#)
+        guard case .unhandled("something_newer") = frame.body else { return XCTFail("\(frame.body)") }
     }
 
     func testLineSeparatorsSurviveParsing() throws {

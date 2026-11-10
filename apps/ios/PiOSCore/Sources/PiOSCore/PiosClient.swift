@@ -83,6 +83,8 @@ public final class PiosClient {
     public let sessions: SessionStore
     public let outbox: ThreadOutbox
     public let appState: AppStatePolicy
+    /// Interactive shells on the machine, over the same socket.
+    public private(set) var terminals: TerminalChannel!
     public let notices = Listeners<ClientNotice>()
     /// Models, commands or stats changed for a session.
     public let metadataChanged = Listeners<String>()
@@ -128,6 +130,10 @@ public final class PiosClient {
             supervisor?.send(entry.command.frame(commandId: entry.commandId)) ?? false
         }
         appState = AppStatePolicy(supervisor: supervisor, scheduler: scheduler)
+        terminals = TerminalChannel(
+            send: { [weak supervisor] command, commandId in supervisor?.send(command.frame(commandId: commandId)) ?? false },
+            generateId: generateId
+        )
 
         supervisor.stateChanged.add { [weak self] state in self?.onSupervisorState(state) }
         supervisor.frames.add { [weak self] frame in self?.onFrame(frame) }
@@ -324,6 +330,7 @@ public final class PiosClient {
         for (sessionId, wanted) in modelsWanted {
             send(.listModels(sessionId: sessionId, all: wanted.all, create: wanted.create))
         }
+        terminals.reconnected()
         outbox.drain()
     }
 
@@ -362,6 +369,7 @@ public final class PiosClient {
     }
 
     private func onFrame(_ frame: ServerFrame) {
+        if terminals.onFrame(frame) { return }
         switch frame.body {
         case let .ack(commandId, _):
             outbox.acknowledge(commandId)
@@ -438,12 +446,13 @@ public final class PiosClient {
             if sessions.needsFullRefetch(sessionId, leafId: leafId) { sessions.clear(sessionId) }
             if subscribed.contains(sessionId) { resync(sessionId) }
             if commandsWanted.contains(sessionId) { send(.listCommands(sessionId: sessionId)) }
-        case .unhandled:
+        case .unhandled, .terminalAttached, .terminalOutput, .terminalExit:
             break
         }
     }
 
     private func onError(_ commandId: String?, code: ErrorCode, message: String) {
+        if let commandId, terminals.onError(commandId, message: message) { return }
         let queued = commandId.map { outbox.reject($0, error: message) } ?? false
         let isSync = commandId.map { syncCommands.remove($0) != nil } ?? false
         guard code != .unauthorized else { return }

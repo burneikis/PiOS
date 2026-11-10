@@ -20,6 +20,11 @@ settings:
 packages:
   PiOSCore:
     path: PiOSCore
+  # Terminal emulator for the shell tab (MIT), the native counterpart of
+  # the PWA's xterm.js.
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    exactVersion: 1.99.3
 
 targets:
   PiOS:
@@ -29,6 +34,7 @@ targets:
       - path: PiOS
     dependencies:
       - package: PiOSCore
+      - package: SwiftTerm
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.pios.app
@@ -60,7 +66,7 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: dev.pios.pair
             CFBundleURLSchemes: [pios]
-        NSCameraUsageDescription: Scan the QR code of a pairing link.
+        NSCameraUsageDescription: Scan pairing QR codes, and take photos to send to the agent.
         # The relay is HTTPS; a daemon on the LAN during development is not.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true

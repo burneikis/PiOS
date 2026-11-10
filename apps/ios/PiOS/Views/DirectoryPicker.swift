@@ -13,6 +13,7 @@ struct DirectoryPicker: View {
     @State private var path: String? = nil
     @State private var error: String? = nil
     @State private var trust = false
+    @AppStorage("pios.directorySort") private var directorySort = "recent"
 
     var body: some View {
         List {
@@ -33,7 +34,7 @@ struct DirectoryPicker: View {
                         Button { path = parent } label: { Label("..", systemImage: "arrow.up") }
                             .listRowBackground(Theme.panel)
                     }
-                    ForEach(listing.entries) { entry in
+                    ForEach(sorted(listing.entries)) { entry in
                         Button { path = entry.path } label: {
                             HStack {
                                 Label(entry.name, systemImage: "folder").foregroundStyle(Theme.text)
@@ -68,6 +69,12 @@ struct DirectoryPicker: View {
             }
         }
         .task(id: path) { await load() }
+    }
+
+    /// The daemon orders by recent pi work; alphabetical is a setting.
+    private func sorted(_ entries: [DirectoryListing.Entry]) -> [DirectoryListing.Entry] {
+        guard directorySort == "alphabetical" else { return entries }
+        return entries.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     private func load() async {

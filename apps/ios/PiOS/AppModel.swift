@@ -43,11 +43,14 @@ final class AppModel {
     /// Last `updatedAt` seen per session, for the unread mark.
     private(set) var seen: [String: Double] = [:]
     var toast: String?
+    /// A file fetched from the machine, waiting for the share sheet.
+    var sharedFile: SharedFile?
     var showPairing = false
     var pairingNotice: String?
     /// A link that opened the app, waiting for the pairing sheet to claim it.
     var pendingPairingLink: String?
 
+    @ObservationIgnored private var gitModels: [Project: GitModel] = [:]
     @ObservationIgnored private var pendingRevisions: Set<String> = []
     @ObservationIgnored private var flushScheduled = false
     @ObservationIgnored private var subscriptions: [Cancel] = []
@@ -237,6 +240,47 @@ final class AppModel {
         summary(sessionId)?.cwd ?? drafts[sessionId]?.cwd
     }
 
+    /// How HTTP routes address a session. A draft has no session the daemon
+    /// knows yet, so it names its directory instead.
+    func project(_ sessionId: String) -> Project {
+        let isDraft = summary(sessionId) == nil && drafts[sessionId] != nil
+        return Project(sessionId: sessionId, cwd: isDraft ? drafts[sessionId]?.cwd : nil)
+    }
+
+    /// Git state per project, kept while the app runs so the chip does not
+    /// blank on every visit.
+    func git(_ sessionId: String) -> GitModel {
+        let key = project(sessionId)
+        if let existing = gitModels[key] { return existing }
+        let created = GitModel(project: key) { [weak self] in self?.api }
+        gitModels[key] = created
+        return created
+    }
+
+    /// Hands bytes from the machine to the system share sheet.
+    func share(data: Data, named name: String) {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name.isEmpty ? "download" : name)
+        do {
+            try data.write(to: url, options: .atomic)
+            sharedFile = SharedFile(url: url)
+        } catch {
+            toast = "Could not save \(name): \(error.localizedDescription)"
+        }
+    }
+
+    /// pi wrote an export on the machine; one inside the project is fetched
+    /// to this device, since this device asked for it.
+    private func fetchExport(sessionId: String, path: String) {
+        guard let cwd = cwd(sessionId), path.hasPrefix(cwd + "/"), let api else { return }
+        Task {
+            do {
+                share(data: try await api.file(project(sessionId), path: path), named: (path as NSString).lastPathComponent)
+            } catch {
+                toast = "The export could not be downloaded: \(error.localizedDescription)"
+            }
+        }
+    }
+
     // MARK: Lifecycle
 
     func setScenePhase(_ phase: ScenePhase) {
@@ -301,8 +345,9 @@ final class AppModel {
         case let .rewound(branch, _):
             open(branch)
             client.refreshSessions()
-        case let .exported(_, path):
+        case let .exported(sessionId, path):
             toast = "Exported to \(collapseHome(path))"
+            fetchExport(sessionId: sessionId, path: path)
         case .sessionsChanged:
             client.refreshSessions()
         }
@@ -322,4 +367,9 @@ final class AppModel {
             self.pendingRevisions.removeAll()
         }
     }
+}
+
+struct SharedFile: Identifiable {
+    var url: URL
+    var id: URL { url }
 }

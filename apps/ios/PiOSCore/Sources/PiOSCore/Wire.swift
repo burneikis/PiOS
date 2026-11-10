@@ -223,6 +223,15 @@ public enum ClientCommand: Sendable {
     case rewind(sessionId: String, entryId: String)
     case extensionUiResponse(sessionId: String, requestId: String, value: String?, confirmed: Bool?, cancelled: Bool?)
     case activity(visible: Bool, focused: Bool, appState: String, sessionIds: [String])
+    /// Attaches to a daemon-owned shell, starting it if the id has none.
+    case terminalOpen(terminalId: String, cwd: String, cols: Int, rows: Int, since: TerminalCursor?, restart: Bool)
+    /// Keystrokes and pastes. Not acked: a reply per key doubles the traffic.
+    case terminalInput(terminalId: String, data: String)
+    case terminalResize(terminalId: String, cols: Int, rows: Int)
+    /// Stops streaming here. The shell keeps running.
+    case terminalDetach(terminalId: String)
+    /// Hangs up the shell for every device.
+    case terminalClose(terminalId: String)
 
     /// The full frame, envelope included.
     public func frame(commandId: String) -> JSON {
@@ -290,6 +299,21 @@ public enum ClientCommand: Sendable {
                 "type": "activity", "visible": .bool(visible), "focused": .bool(focused),
                 "appState": .string(appState), "sessionIds": .array(sessionIds.map(JSON.string)),
             ]
+        case let .terminalOpen(id, cwd, cols, rows, since, restart):
+            return [
+                "type": "terminal_open", "terminalId": .string(id), "cwd": .string(cwd),
+                "cols": .number(Double(cols)), "rows": .number(Double(rows)),
+                "since": since.map { ["instance": .string($0.instance), "offset": .number(Double($0.offset))] },
+                "restart": .bool(restart),
+            ]
+        case let .terminalInput(id, data):
+            return ["type": "terminal_input", "terminalId": .string(id), "data": .string(data)]
+        case let .terminalResize(id, cols, rows):
+            return ["type": "terminal_resize", "terminalId": .string(id), "cols": .number(Double(cols)), "rows": .number(Double(rows))]
+        case let .terminalDetach(id):
+            return ["type": "terminal_detach", "terminalId": .string(id)]
+        case let .terminalClose(id):
+            return ["type": "terminal_close", "terminalId": .string(id)]
         }
     }
 }
@@ -329,6 +353,11 @@ public struct ServerFrame: Sendable {
         case bashState(sessionId: String, command: String, excludeFromContext: Bool, running: Bool, result: BashResult?)
         case rewound(sessionId: String, branchSessionId: String, text: String?)
         case sessionRecovered(sessionId: String, leafId: String?, reason: String)
+        /// Reply to `terminal_open`, ahead of any output. `reset` clears the screen.
+        case terminalAttached(terminalId: String, instance: String, offset: Int, reset: Bool)
+        /// `offset` is where `data` starts in the shell's output, in UTF-16 units.
+        case terminalOutput(terminalId: String, offset: Int, data: String)
+        case terminalExit(terminalId: String, exitCode: Int, signal: Int?)
         /// Terminal frames and anything newer than this build.
         case unhandled(String)
     }
@@ -426,6 +455,15 @@ public struct ServerFrame: Sendable {
             body = .rewound(sessionId: sid, branchSessionId: json["branchSessionId"]?.string ?? "", text: json["text"]?.string)
         case "session_recovered":
             body = .sessionRecovered(sessionId: sid, leafId: json["leafId"]?.string, reason: json["reason"]?.string ?? "")
+        case "terminal_attached":
+            body = .terminalAttached(
+                terminalId: json["terminalId"]?.string ?? "", instance: json["instance"]?.string ?? "",
+                offset: json["offset"]?.int ?? 0, reset: json["reset"]?.bool ?? false
+            )
+        case "terminal_output":
+            body = .terminalOutput(terminalId: json["terminalId"]?.string ?? "", offset: json["offset"]?.int ?? 0, data: json["data"]?.string ?? "")
+        case "terminal_exit":
+            body = .terminalExit(terminalId: json["terminalId"]?.string ?? "", exitCode: json["exitCode"]?.int ?? 0, signal: json["signal"]?.int)
         default:
             body = .unhandled(type)
         }

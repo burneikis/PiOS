@@ -20,6 +20,8 @@ private let nativeCommands = [
     NativeCommand(name: "export", hint: "Export to HTML [path]"),
     NativeCommand(name: "reload", hint: "Reload extensions and skills"),
     NativeCommand(name: "new", hint: "Start a new session"),
+    NativeCommand(name: "sessions", hint: "Back to the session list"),
+    NativeCommand(name: "trust", hint: "Trust this directory"),
     NativeCommand(name: "settings", hint: "Machine and app settings"),
 ]
 
@@ -43,6 +45,8 @@ struct ComposerView: View {
     @State private var text = ""
     @State private var images: [ImageContent] = []
     @State private var picked: [PhotosPickerItem] = []
+    @State private var showLibrary = false
+    @State private var showCamera = false
     @State private var fileMatches: [String] = []
 
     var body: some View {
@@ -79,6 +83,13 @@ struct ComposerView: View {
             if let value { text = value }
         }
         .onChange(of: picked) { _, items in Task { await attach(items) } }
+        .photosPicker(isPresented: $showLibrary, selection: $picked, maxSelectionCount: 6, matching: .images)
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraPicker { data in
+                if let image = encodeForPrompt(data) { images.append(image) }
+            }
+            .ignoresSafeArea()
+        }
         .task(id: mentionQuery) { await searchFiles() }
     }
 
@@ -96,7 +107,14 @@ struct ComposerView: View {
     private func actions(typing: Bool) -> some View {
         HStack(spacing: 4) {
             if !typing {
-                PhotosPicker(selection: $picked, maxSelectionCount: 6, matching: .images) {
+                Menu {
+                    Button { showLibrary = true } label: { Label("Photo Library", systemImage: "photo.on.rectangle") }
+                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                        Button { showCamera = true } label: { Label("Take Photo", systemImage: "camera") }
+                    }
+                    Button { pasteImage() } label: { Label("Paste Image", systemImage: "doc.on.clipboard") }
+                        .disabled(!UIPasteboard.general.hasImages)
+                } label: {
                     Image(systemName: "plus").font(.system(size: 17)).frame(width: 36, height: 36)
                 }
                 .foregroundStyle(Theme.muted)
@@ -294,11 +312,19 @@ struct ComposerView: View {
         }
         try? await Task.sleep(nanoseconds: 150_000_000)
         guard !Task.isCancelled else { return }
-        let matches = try? await api.findFiles(session: sessionId, cwd: isDraft ? model.cwd(sessionId) : nil, query: query)
+        let matches = try? await api.findFiles(model.project(sessionId), query: query, limit: 20)
         fileMatches = matches?.files ?? []
     }
 
     // MARK: Sending
+
+    /// A screenshot is the fastest way to show the agent something, and on a
+    /// phone the clipboard is often the only path to one.
+    private func pasteImage() {
+        for image in UIPasteboard.general.images ?? [] {
+            if let data = image.pngData(), let encoded = encodeForPrompt(data) { images.append(encoded) }
+        }
+    }
 
     private func attach(_ items: [PhotosPickerItem]) async {
         for item in items {
@@ -380,6 +406,10 @@ struct ComposerView: View {
             model.pickerStart = model.cwd(sessionId) ?? ""
         case "settings":
             model.showSettings = true
+        case "sessions":
+            model.open(nil)
+        case "trust":
+            client.setSessionTrust(sessionId, true)
         default:
             return false
         }
@@ -420,5 +450,34 @@ struct SuggestionRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// The system camera, returning the photo's bytes.
+struct CameraPicker: UIViewControllerRepresentable {
+    let onPick: (Data) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let parent: CameraPicker
+        init(parent: CameraPicker) { self.parent = parent }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            if let image = info[.originalImage] as? UIImage, let data = image.jpegData(compressionQuality: 0.9) { parent.onPick(data) }
+            parent.dismiss()
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { parent.dismiss() }
     }
 }

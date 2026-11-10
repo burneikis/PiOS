@@ -7,35 +7,6 @@ struct PairResult: Decodable {
     var serverVersion: String?
 }
 
-struct DirectoryListing: Decodable {
-    struct Entry: Decodable, Identifiable, Hashable {
-        var name: String
-        var path: String
-        var dir: Bool?
-        var lastSessionAt: Double?
-        var id: String { path }
-    }
-
-    var root: String
-    var path: String
-    var name: String
-    var parent: String?
-    var entries: [Entry]
-}
-
-struct FileMatches: Decodable {
-    var cwd: String
-    var files: [String]
-}
-
-struct TextFile: Decodable {
-    var etag: String
-    var bytes: Int
-    var text: String
-    var editable: Bool
-    var reason: String?
-}
-
 enum MachineAPIError: LocalizedError {
     case status(Int, String?)
     case badURL
@@ -47,6 +18,26 @@ enum MachineAPIError: LocalizedError {
         case .badURL: return "The machine URL is not valid."
         }
     }
+}
+
+/// Which project a route is about: a session, or for a draft, which has no
+/// session yet, the directory it names.
+struct Project: Hashable {
+    var sessionId: String
+    var cwd: String?
+
+    var query: [URLQueryItem] {
+        var items = [URLQueryItem(name: "session", value: sessionId)]
+        if let cwd { items.append(.init(name: "cwd", value: cwd)) }
+        return items
+    }
+}
+
+enum SaveResult {
+    case saved(etag: String)
+    /// The file changed underneath: the agent or another device wrote it.
+    case conflict(etag: String)
+    case failed(String)
 }
 
 /// The daemon's HTTP routes. Every call but `/pair` and `/health` carries the
@@ -80,13 +71,6 @@ struct MachineAPI {
         return try await decode(request)
     }
 
-    func health() async -> Bool {
-        var request = URLRequest(url: base.appendingPathComponent("health"))
-        request.timeoutInterval = 4
-        guard let (_, response) = try? await URLSession.shared.data(for: request) else { return false }
-        return (response as? HTTPURLResponse)?.statusCode == 200
-    }
-
     /// Whether the machine revoked this device. Only an authenticated route
     /// answering 401 proves it; a relay hiccup must never cost a pairing.
     func isRevoked() async -> Bool {
@@ -95,29 +79,59 @@ struct MachineAPI {
         return (response as? HTTPURLResponse)?.statusCode == 401
     }
 
-    /// Directories under home, newest pi work first; or, with a session,
-    /// the project tree including files.
-    func directories(path: String?, session: String? = nil, files: Bool = false) async throws -> DirectoryListing {
-        var query: [URLQueryItem] = []
+    // MARK: Directories and files
+
+    /// Directories under home, newest pi work first.
+    func directories(path: String?) async throws -> DirectoryListing {
+        try await decode(try authorized("dirs", path.map { [.init(name: "path", value: $0)] } ?? []))
+    }
+
+    /// The project tree, files included, rooted at the session's directory.
+    func tree(_ project: Project, path: String?) async throws -> DirectoryListing {
+        var query = project.query + [.init(name: "files", value: "1")]
         if let path { query.append(.init(name: "path", value: path)) }
-        if let session { query.append(.init(name: "session", value: session)) }
-        if files { query.append(.init(name: "files", value: "1")) }
         return try await decode(try authorized("dirs", query))
     }
 
-    /// Fuzzy file search in a session's directory, for `@` mentions.
-    func findFiles(session: String, cwd: String?, query: String) async throws -> FileMatches {
-        var items = [URLQueryItem(name: "session", value: session), .init(name: "q", value: query), .init(name: "limit", value: "20")]
-        if let cwd { items.append(.init(name: "cwd", value: cwd)) }
-        return try await decode(try authorized("files", items))
+    /// Fuzzy file search in the project: gitignore-aware, daemon-side.
+    func findFiles(_ project: Project, query: String, limit: Int = 30) async throws -> FileMatches {
+        try await decode(try authorized("files", project.query + [.init(name: "q", value: query), .init(name: "limit", value: String(limit))]))
     }
 
-    func textFile(session: String, path: String) async throws -> TextFile {
-        try await decode(try authorized("file", [.init(name: "session", value: session), .init(name: "path", value: path), .init(name: "text", value: "1")]))
+    func textFile(_ project: Project, path: String) async throws -> TextFile {
+        let request = try authorized("file", project.query + [.init(name: "path", value: path), .init(name: "text", value: "1")])
+        return try await decode(request)
+    }
+
+    /// Saves against the etag the text was loaded from; `force` overwrites
+    /// whatever is there now.
+    func saveText(_ project: Project, path: String, text: String, file: TextFile, force: Bool) async throws -> SaveResult {
+        var request = try authorized("file", project.query + [
+            .init(name: "path", value: path), .init(name: "eol", value: file.eol),
+            .init(name: "nl", value: file.trailingNewline ? "1" : "0"),
+        ])
+        request.httpMethod = "PUT"
+        request.setValue(force ? "*" : file.etag, forHTTPHeaderField: "if-match")
+        request.setValue("text/plain", forHTTPHeaderField: "content-type")
+        request.httpBody = Data(text.utf8)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let body = try? JSON.parse(data)
+        if (200 ..< 300).contains(status), let etag = body?["etag"]?.string { return .saved(etag: etag) }
+        if status == 409, let etag = body?["etag"]?.string { return .conflict(etag: etag) }
+        return .failed(body?["error"]?.string ?? "Save failed (\(status)).")
+    }
+
+    /// Raw bytes of a project file, for images and downloads.
+    func file(_ project: Project, path: String) async throws -> Data {
+        let request = try authorized("file", project.query + [.init(name: "path", value: path)])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try check(response, data)
+        return data
     }
 
     /// Bytes of an image the transcript refers to by name. Content-addressed,
-    /// so the cache may keep them for good.
+    /// so a cache may keep them for good.
     func image(ref: String) async throws -> Data {
         let request = try authorized("image", [.init(name: "name", value: ref)])
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -125,12 +139,81 @@ struct MachineAPI {
         return data
     }
 
-    func file(session: String, path: String) async throws -> Data {
-        let request = try authorized("file", [.init(name: "session", value: session), .init(name: "path", value: path)])
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try check(response, data)
-        return data
+    // MARK: Git
+
+    /// Nil is the daemon saying "not a repository", a different fact from a
+    /// failed read, which throws.
+    func gitStatus(_ project: Project, fresh: Bool) async throws -> GitStatus? {
+        struct Body: Decodable { var status: GitStatus? }
+        var query = project.query
+        if fresh { query.append(.init(name: "fresh", value: "1")) }
+        let body: Body = try await decode(try authorized("git/status", query))
+        return body.status
     }
+
+    enum DiffSubject: Hashable {
+        case file(path: String, staged: Bool)
+        case commit(String)
+        case stash(String)
+    }
+
+    func gitDiff(_ project: Project, _ subject: DiffSubject) async throws -> String {
+        struct Body: Decodable { var diff: String? }
+        var query = project.query
+        switch subject {
+        case let .file(path, staged):
+            query.append(.init(name: "path", value: path))
+            if staged { query.append(.init(name: "staged", value: "1")) }
+        case let .commit(sha): query.append(.init(name: "commit", value: sha))
+        case let .stash(ref): query.append(.init(name: "stash", value: ref))
+        }
+        let body: Body = try await decode(try authorized("git/diff", query))
+        return body.diff ?? ""
+    }
+
+    func gitLog(_ project: Project, skip: Int, limit: Int = 40) async throws -> [GitLogEntry] {
+        struct Body: Decodable { var commits: [GitLogEntry] }
+        let query = project.query + [.init(name: "skip", value: String(skip)), .init(name: "limit", value: String(limit))]
+        let body: Body = try await decode(try authorized("git/log", query))
+        return body.commits
+    }
+
+    func gitBranches(_ project: Project) async throws -> GitBranches? {
+        struct Body: Decodable { var branches: GitBranches? }
+        let body: Body = try await decode(try authorized("git/branches", project.query))
+        return body.branches
+    }
+
+    func gitStashes(_ project: Project) async throws -> [GitStash] {
+        struct Body: Decodable { var stashes: [GitStash] }
+        let body: Body = try await decode(try authorized("git/stashes", project.query))
+        return body.stashes
+    }
+
+    /// Runs an action; the recomputed status and git's own output come back
+    /// on the response, so the view never needs a second round trip.
+    func gitAction(_ project: Project, _ action: GitAction) async throws -> (status: GitStatus?, output: String) {
+        struct Body: Decodable { var status: GitStatus?; var output: String? }
+        var request = try authorized("git/action", project.query)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.httpBody = action.json.encoded()
+        // Push and pull can sit on a slow remote.
+        request.timeoutInterval = 180
+        let body: Body = try await decode(request)
+        return (body.status, body.output ?? "")
+    }
+
+    // MARK: Usage
+
+    /// Plan usage for pi's Anthropic login; nil when the machine has none.
+    func usage() async throws -> UsageReport? {
+        struct Body: Decodable { var usage: UsageReport? }
+        let body: Body = try await decode(try authorized("usage", []))
+        return body.usage
+    }
+
+    // MARK: Plumbing
 
     private func authorized(_ path: String, _ query: [URLQueryItem]) throws -> URLRequest {
         guard var components = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false) else {
@@ -152,6 +235,8 @@ struct MachineAPI {
     private func check(_ response: URLResponse, _ data: Data) throws {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard !(200 ..< 300).contains(status) else { return }
+        // The daemon reports a failed git invocation verbatim; it is the only
+        // useful thing to show.
         let body = try? JSON.parse(data)
         throw MachineAPIError.status(status, body?["message"]?.string ?? body?["error"]?.string)
     }

@@ -20,6 +20,7 @@ struct ChatView: View {
     @State private var allModels = false
     @State private var showInfo = false
     @FocusState private var composing: Bool
+    @State private var route: ChatRoute? = nil
 
     var body: some View {
         let view = model.view(sessionId)
@@ -72,6 +73,27 @@ struct ChatView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar(view: view, summary: summary, isDraft: isDraft, title: title, state: state) }
+        .navigationDestination(item: $route) { route in
+            switch route {
+            case .git:
+                GitView(git: model.git(sessionId))
+            case .files:
+                FilesView(project: model.project(sessionId), root: cwd ?? "")
+                    .navigationDestination(for: FileRoute.self) { next in
+                        switch next {
+                        case let .directory(path): FilesView(project: model.project(sessionId), root: cwd ?? "", path: path)
+                        case let .file(path): FileEditorView(project: model.project(sessionId), path: path)
+                        }
+                    }
+            case .terminal:
+                // One shell per session, shared by every device.
+                TerminalScreen(terminalId: sessionId, cwd: cwd ?? "")
+            }
+        }
+        .task(id: view.running) {
+            // A turn that settled has stopped writing files.
+            if !view.running { await model.git(sessionId).refresh(fresh: false) }
+        }
         .sheet(item: dialogBinding(view)) { request in
             DialogSheet(request: request) { answer in
                 model.client.answerDialog(
@@ -161,8 +183,15 @@ struct ChatView: View {
             }
         }
         ToolbarItem(placement: .topBarTrailing) {
+            GitChip(git: model.git(sessionId)) { route = .git }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 Section {
+                    Button { route = .files } label: { Label("Files", systemImage: "doc") }
+                    if model.cwd(sessionId) != nil {
+                        Button { route = .terminal } label: { Label("Terminal", systemImage: "terminal") }
+                    }
                     Button { model.pickerStart = model.cwd(sessionId) ?? "" } label: {
                         Label("New session", systemImage: "plus")
                     }
@@ -200,6 +229,10 @@ struct ChatView: View {
             }
         }
     }
+}
+
+enum ChatRoute: Hashable {
+    case git, files, terminal
 }
 
 extension AppModel {
