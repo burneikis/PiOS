@@ -242,25 +242,3 @@ test("a terminal open defaults to attaching, and sizes are bounded", () => {
   });
   assert.equal(output.type === "terminal_output" && output.data, "\u001b[32mok\u2028\r\n");
 });
-
-test("notification frames and their opt-in and ack round-trip", () => {
-  const frame = ServerFrameSchema.parse({
-    v: WIRE_VERSION,
-    type: "notification",
-    id: "n1",
-    sessionId: "s1",
-    title: "repo",
-    body: "Done.",
-    tag: "session:s1",
-    at: 1,
-  });
-  assert.equal(frame.type === "notification" && frame.id, "n1");
-  assert.ok(
-    ClientFrameSchema.safeParse({ v: WIRE_VERSION, type: "set_notifications", commandId: "c1", enabled: true })
-      .success,
-  );
-  assert.ok(
-    ClientFrameSchema.safeParse({ v: WIRE_VERSION, type: "ack_notifications", commandId: "c2", ids: ["n1"] })
-      .success,
-  );
-});

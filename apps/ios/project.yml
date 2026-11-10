@@ -66,10 +66,6 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: dev.pios.pair
             CFBundleURLSchemes: [pios]
-        # Settle notifications are collected from the daemon on background
-        # refreshes: no APNs entitlement survives a free sideload signature.
-        UIBackgroundModes: [fetch]
-        BGTaskSchedulerPermittedIdentifiers: [dev.pios.app.refresh]
         NSCameraUsageDescription: Scan pairing QR codes, and take photos to send to the agent.
         # The relay is HTTPS; a daemon on the LAN during development is not.
         NSAppTransportSecurity:

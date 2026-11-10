@@ -109,12 +109,8 @@ export to the share sheet.
 
 Different by necessity:
 
-- **Notifications** come from the daemon's per-device inbox, not APNs,
-  which needs a paid developer account's entitlement that a free SideStore
-  signature cannot carry. With the Settings toggle on, the app shows each
-  settled turn as a local notification and acknowledges it: at once while
-  the socket is up (including the half minute iOS grants after leaving the
-  app), and otherwise on the next reconnect or background refresh, which iOS
-  schedules when it sees fit. The PWA's web push remains the instant path.
+- **Push notifications** stay with the PWA. Native push needs APNs, which
+  needs the daemon to speak it and a paid developer account's entitlement;
+  a free SideStore signature cannot carry it.
 - **The editor** is a plain monospaced text view: no syntax highlighting or
   line numbers, which CodeMirror gives the PWA.

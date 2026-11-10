@@ -15,7 +15,6 @@ import { createSessionHost } from "./session-host.ts";
 import { SettleNotifier, type Notification } from "./notifier.ts";
 import { ExternalTurnNotifier } from "./external-turns.ts";
 import { PushStore } from "./push.ts";
-import { NotificationInbox } from "./inbox.ts";
 import { SessionStoreWatcher } from "./store-watcher.ts";
 import { TerminalHost, type TerminalHostOptions } from "./terminals.ts";
 import { TrustStore } from "./trust.ts";
@@ -24,7 +23,6 @@ import {
   authStorePath,
   defaultConfig,
   pushStorePath,
-  inboxStorePath,
   relayKeyPath,
   type ServerConfig,
 } from "./config.ts";
@@ -45,7 +43,6 @@ export class PiosServer {
   readonly auth: AuthStore;
   readonly registry: SessionRegistry;
   readonly push: PushStore;
-  readonly inbox: NotificationInbox;
   readonly images: ImageStore;
   readonly usage: ClaudeUsage;
   readonly terminals: TerminalHost;
@@ -83,7 +80,6 @@ export class PiosServer {
       this.externalTurns.changed(files);
     });
     this.push = new PushStore(pushStorePath(this.config), this.config.pushSubject);
-    this.inbox = new NotificationInbox(inboxStorePath(this.config));
     this.images = new ImageStore(join(this.config.dataDir, "images"));
     this.terminals = new TerminalHost(options.terminals);
     this.usage = new ClaudeUsage({
@@ -146,7 +142,6 @@ export class PiosServer {
         announceSessions: () => this.announceSessions(),
         images: this.images,
         terminals: this.terminals,
-        inbox: this.inbox,
       });
       this.connections.add(connection);
       socket.on("close", () => this.connections.delete(connection));
@@ -204,28 +199,10 @@ export class PiosServer {
   }
 
   private async sendPush(notification: Notification): Promise<void> {
-    this.sendToInbox(notification);
     try {
       await this.push.send(notification.message, notification.skipDeviceIds);
     } catch (error) {
       console.error("[pios] push failed", error);
-    }
-  }
-
-  /** Queued for every opted-in device, and sent at once to any connected. */
-  private sendToInbox(notification: Notification): void {
-    try {
-      const paired = new Set(this.auth.listDevices().map((device) => device.id));
-      const recipients = this.inbox
-        .recipients(notification.skipDeviceIds)
-        .filter((id) => paired.has(id));
-      const items = this.inbox.add(notification.sessionId, notification.message, recipients);
-      for (const connection of this.connections) {
-        const item = connection.deviceId ? items.get(connection.deviceId) : undefined;
-        if (item) connection.sendNotification(item);
-      }
-    } catch (error) {
-      console.error("[pios] notification inbox failed", error);
     }
   }
 

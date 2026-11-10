@@ -195,27 +195,6 @@ public struct SessionCreate: Hashable, Codable, Sendable {
     }
 }
 
-/// A settled turn, delivered over the socket to a device no push service can
-/// wake. `id` is stable across redeliveries, so showing it twice replaces.
-public struct DeviceNotification: Hashable, Sendable {
-    public var id: String
-    public var sessionId: String
-    public var title: String
-    public var body: String
-    /// One per session: a later one replaces an unread earlier one.
-    public var tag: String
-    public var at: Double
-
-    public init(id: String, sessionId: String, title: String, body: String, tag: String, at: Double) {
-        self.id = id
-        self.sessionId = sessionId
-        self.title = title
-        self.body = body
-        self.tag = tag
-        self.at = at
-    }
-}
-
 /// A client frame minus the envelope, which the client stamps on every send.
 public enum ClientCommand: Sendable {
     case hello(deviceToken: String, clientVersion: String)
@@ -253,10 +232,6 @@ public enum ClientCommand: Sendable {
     case terminalDetach(terminalId: String)
     /// Hangs up the shell for every device.
     case terminalClose(terminalId: String)
-    /// Opts this device into notifications over the socket, kept on the daemon.
-    case setNotifications(enabled: Bool)
-    /// Shown; the daemon stops resending them.
-    case ackNotifications(ids: [String])
 
     /// The full frame, envelope included.
     public func frame(commandId: String) -> JSON {
@@ -339,10 +314,6 @@ public enum ClientCommand: Sendable {
             return ["type": "terminal_detach", "terminalId": .string(id)]
         case let .terminalClose(id):
             return ["type": "terminal_close", "terminalId": .string(id)]
-        case let .setNotifications(enabled):
-            return ["type": "set_notifications", "enabled": .bool(enabled)]
-        case let .ackNotifications(ids):
-            return ["type": "ack_notifications", "ids": .array(ids.map(JSON.string))]
         }
     }
 }
@@ -387,8 +358,6 @@ public struct ServerFrame: Sendable {
         /// `offset` is where `data` starts in the shell's output, in UTF-16 units.
         case terminalOutput(terminalId: String, offset: Int, data: String)
         case terminalExit(terminalId: String, exitCode: Int, signal: Int?)
-        /// A settled turn for this device, resent until acknowledged.
-        case notification(DeviceNotification)
         /// Terminal frames and anything newer than this build.
         case unhandled(String)
     }
@@ -495,12 +464,6 @@ public struct ServerFrame: Sendable {
             body = .terminalOutput(terminalId: json["terminalId"]?.string ?? "", offset: json["offset"]?.int ?? 0, data: json["data"]?.string ?? "")
         case "terminal_exit":
             body = .terminalExit(terminalId: json["terminalId"]?.string ?? "", exitCode: json["exitCode"]?.int ?? 0, signal: json["signal"]?.int)
-        case "notification":
-            guard let id = json["id"]?.string, let sessionId = json["sessionId"]?.string else { throw ParseError.malformed }
-            body = .notification(DeviceNotification(
-                id: id, sessionId: sessionId, title: json["title"]?.string ?? "", body: json["body"]?.string ?? "",
-                tag: json["tag"]?.string ?? "session:\(sessionId)", at: json["at"]?.double ?? 0
-            ))
         default:
             body = .unhandled(type)
         }

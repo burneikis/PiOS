@@ -78,15 +78,11 @@ struct SettingsView: View {
             UsageSection()
 
             Section {
-                Toggle("Notify when a turn settles", isOn: Binding(
-                    get: { model.notificationsEnabled },
-                    set: { on in Task { await model.setNotificationsEnabled(on) } }
-                ))
+                Text("Notifications when a turn settles come from the PWA's web push. Keep the PWA installed on the home screen for them; the daemon skips them while this app shows the session.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.muted)
             } header: {
                 Text("Notifications")
-            } footer: {
-                // Honest about the limit: a sideloaded build cannot receive push.
-                Text("Collected from the machine: at once while the app is open or just closed, otherwise when iOS grants a background refresh, which can take a while. The PWA's web push stays instant.")
             }
             .listRowBackground(Theme.panel)
 

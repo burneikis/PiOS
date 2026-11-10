@@ -142,10 +142,6 @@ export function pushStorePath(config: ServerConfig): string {
   return join(config.dataDir, "push.json");
 }
 
-export function inboxStorePath(config: ServerConfig): string {
-  return join(config.dataDir, "notification-inbox.json");
-}
-
 export function relayKeyPath(config: ServerConfig): string {
   return join(config.dataDir, "relay-key.json");
 }

@@ -16,10 +16,6 @@ struct PiOSApp: App {
                 .onChange(of: scenePhase) { _, phase in model.setScenePhase(phase) }
                 .onOpenURL { url in openPairingLink(url) }
         }
-        // Collects what the daemon's inbox holds for this device.
-        .backgroundTask(.appRefresh(Notifications.refreshTask)) { [model] in
-            await model.backgroundRefresh()
-        }
     }
 
     /// `pios://host/#pt=...` is the printed link with its scheme swapped, so

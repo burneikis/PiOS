@@ -54,9 +54,6 @@ final class AppModel {
     var pairingNotice: String?
     /// A link that opened the app, waiting for the pairing sheet to claim it.
     var pendingPairingLink: String?
-    /// Settle notifications through the daemon's inbox, for this device.
-    private(set) var notificationsEnabled: Bool
-    @ObservationIgnored let notifications: Notifications
 
     @ObservationIgnored private var gitModels: [Project: GitModel] = [:]
     @ObservationIgnored private var pendingRevisions: Set<String> = []
@@ -81,11 +78,6 @@ final class AppModel {
         composerTexts = readVersioned(storage, "pios.composer", version: 1, fallback: [String: String]())
         connection = client.supervisor.state
         outbox = client.outbox.entries
-        notifications = Notifications(storage: storage)
-        notificationsEnabled = readVersioned(storage, Self.notificationsKey, version: 1, fallback: false)
-        notifications.model = self
-        // Remembered by the client and re-sent on every connect.
-        if notificationsEnabled { client.setNotifications(true) }
 
         subscriptions.append(client.supervisor.stateChanged.add { [weak self] state in self?.onConnection(state) })
         subscriptions.append(client.outbox.changed.add { [weak self] entries in self?.outbox = entries })
@@ -192,7 +184,6 @@ final class AppModel {
         if sessionId != selection { path = [] }
         selection = sessionId
         drawerOpen = false
-        if let sessionId { notifications.clear(sessionId: sessionId) }
         if let sessionId, let summary = summary(sessionId) { markSeen(summary) }
         reportActivity()
     }
@@ -298,70 +289,14 @@ final class AppModel {
         }
     }
 
-    // MARK: Notifications
-
-    private static let notificationsKey = "pios.notifications"
-
-    /// Turning it on asks iOS first; a refusal leaves it off and says where
-    /// to change that.
-    func setNotificationsEnabled(_ enabled: Bool) async {
-        if enabled, !(await notifications.requestAuthorization()) {
-            toast = "Notifications are off for PiOS. Allow them in iOS Settings."
-            return
-        }
-        notificationsEnabled = enabled
-        writeVersioned(storage, Self.notificationsKey, version: 1, enabled)
-        client.setNotifications(enabled)
-        notifications.scheduleRefresh()
-    }
-
-    /// The session is on screen, so a notification about it says nothing.
-    func isReading(_ sessionId: String?) -> Bool {
-        scenePhase == .active && sessionId != nil && selection == sessionId
-    }
-
-    func openFromNotification(sessionId: String, machineId: String?) {
-        if let machineId, !machineId.isEmpty, machineId != activeMachine?.id,
-           let machine = machines.machines.first(where: { $0.id == machineId }) {
-            activate(machine)
-        }
-        open(sessionId)
-    }
-
-    private func deliver(_ note: DeviceNotification) {
-        let machineId = activeMachine?.id
-        Task {
-            if await notifications.show(note, machineId: machineId) { client.acknowledgeNotifications([note.id]) }
-        }
-    }
-
-    /// A slot iOS granted while the app was away: reconnect, let the daemon
-    /// hand over its inbox, and give the acks time to leave.
-    func backgroundRefresh() async {
-        notifications.scheduleRefresh()
-        guard notificationsEnabled, isPaired else { return }
-        client.supervisor.wake("background-refresh")
-        var waited = 0
-        while connection.transport != .connected, waited < 60 {
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            waited += 1
-        }
-        guard connection.transport == .connected else { return }
-        try? await Task.sleep(nanoseconds: 2_000_000_000)
-    }
-
     // MARK: Lifecycle
 
     func setScenePhase(_ phase: ScenePhase) {
         scenePhase = phase
         switch phase {
-        case .active:
-            client.appState.set(.active)
-            notifications.enteredForeground()
+        case .active: client.appState.set(.active)
         case .inactive: client.appState.set(.inactive)
-        case .background:
-            client.appState.set(.background)
-            notifications.enteredBackground()
+        case .background: client.appState.set(.background)
         @unknown default: break
         }
         reportActivity()
@@ -423,8 +358,6 @@ final class AppModel {
             fetchExport(sessionId: sessionId, path: path)
         case .sessionsChanged:
             client.refreshSessions()
-        case let .notification(note):
-            deliver(note)
         }
     }
 

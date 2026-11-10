@@ -211,41 +211,6 @@ test("a redelivered prompt is acked but not run twice", async () => {
   client.close();
 });
 
-test("an opted-in device gets settles over the socket until it acks them", async () => {
-  const watcher = await hello(harness);
-  const cwd = join(harness.dir, "notify");
-  mkdirSync(cwd, { recursive: true });
-  const sessionId = await createSession(watcher, cwd);
-
-  const away = await hello(harness);
-  await away.waitForCommand(away.send({ type: "set_notifications", enabled: true }));
-  await watcher.waitForCommand(watcher.send({ type: "subscribe", sessionId }));
-  watcher.send({ type: "prompt", sessionId, messageId: "n1", text: "notify me", images: [] });
-  await settled(watcher, sessionId);
-
-  const live = await away.waitFor((f) => f.type === "notification" && f.sessionId === sessionId);
-  assert.ok(live.type === "notification");
-  assert.equal(live.tag, `session:${sessionId}`);
-  away.close();
-
-  // Unacknowledged, so it comes back on the next connect.
-  const again = await hello(harness);
-  const resent = await again.waitFor((f) => f.type === "notification" && f.sessionId === sessionId);
-  assert.equal(resent.type === "notification" && resent.id, live.id);
-  await again.waitForCommand(again.send({ type: "ack_notifications", ids: [live.id] }));
-  assert.equal(harness.server.inbox.pending(deviceIdOf(harness)).length, 0);
-
-  await again.waitForCommand(again.send({ type: "set_notifications", enabled: false }));
-  watcher.close();
-  again.close();
-});
-
-function deviceIdOf(h: Harness): string {
-  const [device] = h.server.auth.listDevices();
-  assert.ok(device);
-  return device.id;
-}
-
 test("a rewind branches into a new session and leaves the old one intact", async () => {
   const client = await hello(harness);
   const cwd = join(harness.dir, "rewind");

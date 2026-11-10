@@ -65,8 +65,6 @@ public enum ClientNotice: Sendable {
     case rewound(branchSessionId: String, text: String)
     case exported(sessionId: String, path: String)
     case sessionsChanged
-    /// For the platform to show, then `acknowledgeNotifications`.
-    case notification(DeviceNotification)
 }
 
 /// Everything above the socket, wired together.
@@ -108,8 +106,6 @@ public final class PiosClient {
     private var statsWanted: Set<String> = []
     private var rewoundText: [String: String] = [:]
     private var lastTransport: TransportHealth = .idle
-    /// Re-asserted on every connect: the daemon may have lost or never seen it.
-    private var notificationsWanted: Bool?
 
     public init(
         createTransport: @escaping TransportFactory,
@@ -285,17 +281,6 @@ public final class PiosClient {
     }
 
     /// Marks a session live: subscribed now and after every reconnect.
-    /// Settle notifications over the socket, for a device nothing can push to.
-    public func setNotifications(_ enabled: Bool) {
-        notificationsWanted = enabled
-        if supervisor.state.transport == .connected { send(.setNotifications(enabled: enabled)) }
-    }
-
-    @discardableResult
-    public func acknowledgeNotifications(_ ids: [String]) -> Bool {
-        ids.isEmpty ? false : send(.ackNotifications(ids: ids))
-    }
-
     public func watch(_ sessionId: String) {
         subscribed.insert(sessionId)
         if supervisor.state.transport == .connected { resync(sessionId) }
@@ -345,7 +330,6 @@ public final class PiosClient {
         for (sessionId, wanted) in modelsWanted {
             send(.listModels(sessionId: sessionId, all: wanted.all, create: wanted.create))
         }
-        if let notificationsWanted { send(.setNotifications(enabled: notificationsWanted)) }
         terminals.reconnected()
         outbox.drain()
     }
@@ -462,8 +446,6 @@ public final class PiosClient {
             if sessions.needsFullRefetch(sessionId, leafId: leafId) { sessions.clear(sessionId) }
             if subscribed.contains(sessionId) { resync(sessionId) }
             if commandsWanted.contains(sessionId) { send(.listCommands(sessionId: sessionId)) }
-        case let .notification(notification):
-            notices.emit(.notification(notification))
         case .unhandled, .terminalAttached, .terminalOutput, .terminalExit:
             break
         }
