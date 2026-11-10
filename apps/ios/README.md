@@ -96,16 +96,21 @@ replies without timestamps (the stub agent writes those) stay two rows.
 
 ## Scope
 
-Shipped: pairing (paste, QR, `pios://`), multiple machines, the session list
-(search, paging, pull to refresh, status), drafts and directory picker,
-streaming chat with markdown, thinking, tool cards with diffs and images,
-the outbox with pending/failed states, steer and follow-up, interrupt, `!`
-and `!!` commands, `/` commands (native and session), `@` file mentions,
-photo attachments, extension dialogs and presentation (status, widgets,
-notices, editor text), retry/compaction/trust/crash banners, model and
-thinking pickers, rename, compact, reload, export, copy, rewind, session
-stats, activity reports for push suppression, and background reconnect.
+At parity with the PWA: pairing (paste, QR, `pios://`), multiple machines,
+the session list (search, paging, unread marks, docked sidebar or drawer),
+drafts, streaming chat with markdown, thinking, tool rows, diffs and images,
+the outbox, steer and follow-up, `!`/`!!`, `/` and `@` completion, photos
+from the library, camera or clipboard, extension dialogs and presentation,
+banners, model and thinking pickers, session commands, rewind, stats, the
+git view (changes, commit and amend, history, branches, stashes, fetch, pull,
+push), the file browser and editor (etag saves, conflicts, drafts kept on
+the device), the terminal (SwiftTerm on the daemon's PTY), plan usage, and
+export to the share sheet.
 
-Not yet: the file browser and editor, the git view, the terminal tab, APNs
-push and Live Activities. Those are daemon routes the PWA already uses, so
-they are client-only work.
+Different by necessity:
+
+- **Push notifications** stay with the PWA. Native push needs APNs, which
+  needs the daemon to speak it and a paid developer account's entitlement;
+  a free SideStore signature cannot carry it.
+- **The editor** is a plain monospaced text view: no syntax highlighting or
+  line numbers, which CodeMirror gives the PWA.
