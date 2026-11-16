@@ -19,6 +19,7 @@ struct ChatView: View {
     @State private var compactNote = ""
     @State private var allModels = false
     @State private var showInfo = false
+    @State private var atBottom = true
     @FocusState private var composing: Bool
 
     var body: some View {
@@ -51,6 +52,8 @@ struct ChatView: View {
                         StatsFooter(stats: stats)
                     }
                     Color.clear.frame(height: 1).id(bottomId)
+                        .onAppear { legacyAtBottom(true) }
+                        .onDisappear { legacyAtBottom(false) }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
@@ -58,6 +61,7 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity)
             }
             .defaultScrollAnchor(.bottom)
+            .trackingBottom($atBottom)
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.bg)
             // The dock floats over the transcript, which reads through it.
@@ -68,6 +72,27 @@ struct ChatView: View {
                     onInfo: { showInfo = true },
                     onSent: { withAnimation { proxy.scrollTo(bottomId, anchor: .bottom) } }
                 )
+                // Hung above the dock rather than in it: appearing mid-scroll
+                // must not resize the dock and so move the transcript.
+                .overlay(alignment: .top) {
+                    if !atBottom {
+                        Button {
+                            withAnimation { proxy.scrollTo(bottomId, anchor: .bottom) }
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Theme.text)
+                                .frame(width: 36, height: 36)
+                                .glassSurface(cornerRadius: 18, interactive: true)
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Scroll to latest")
+                        .alignmentGuide(.top) { $0[.bottom] + 8 }
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    }
+                }
+                .animation(.easeOut(duration: 0.15), value: atBottom)
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -154,7 +179,13 @@ struct ChatView: View {
 
     private var covered: Bool {
         !model.path.isEmpty || model.drawerOpen || model.showSettings || model.pickerStart != nil
-            || allModels || showInfo
+            || allModels || showInfo || model.viewedImage != nil
+    }
+
+    /// Before iOS 18 there is no scroll geometry to read, so the tail
+    /// sentinel entering or leaving the lazy stack stands in for it.
+    private func legacyAtBottom(_ visible: Bool) {
+        if #unavailable(iOS 18.0) { atBottom = visible }
     }
 
     private func dismissKeyboard() {
@@ -246,6 +277,23 @@ struct ChatView: View {
             } label: {
                 Image(systemName: "ellipsis")
             }
+        }
+    }
+}
+
+extension View {
+    /// Within this much of the tail still counts as reading it.
+    @ViewBuilder
+    func trackingBottom(_ atBottom: Binding<Bool>, slack: CGFloat = 48) -> some View {
+        if #available(iOS 18.0, *) {
+            onScrollGeometryChange(for: Bool.self) { geometry in
+                let visibleEnd = geometry.contentOffset.y + geometry.containerSize.height - geometry.contentInsets.bottom
+                return visibleEnd >= geometry.contentSize.height - slack
+            } action: { _, near in
+                atBottom.wrappedValue = near
+            }
+        } else {
+            self
         }
     }
 }

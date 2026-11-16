@@ -55,6 +55,9 @@ struct RootView: View {
         .sheet(item: $model.sharedFile) { file in
             ShareSheet(items: [file.url]).ignoresSafeArea()
         }
+        .fullScreenCover(item: $model.viewedImage) { viewed in
+            ImageViewer(image: viewed.image)
+        }
         .overlay(alignment: .top) { ToastView() }
     }
 }

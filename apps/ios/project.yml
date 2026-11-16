@@ -67,6 +67,7 @@ targets:
           - CFBundleURLName: dev.pios.pair
             CFBundleURLSchemes: [pios]
         NSCameraUsageDescription: Scan pairing QR codes, and take photos to send to the agent.
+        NSPhotoLibraryAddUsageDescription: Save images from a chat to your photo library.
         # The relay is HTTPS; a daemon on the LAN during development is not.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true

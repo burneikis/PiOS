@@ -50,6 +50,8 @@ final class AppModel {
     var toast: String?
     /// A file fetched from the machine, waiting for the share sheet.
     var sharedFile: SharedFile?
+    /// The image open full screen, if any.
+    var viewedImage: ViewedImage?
     var showPairing = false
     var pairingNotice: String?
     /// A link that opened the app, waiting for the pairing sheet to claim it.
