@@ -13,8 +13,14 @@ struct TranscriptItem: View {
     var body: some View {
         switch item {
         case let .message(_, message, entryId, failedAttempts):
-            MessageView(message: message, tools: view.tools, cwd: cwd, failedAttempts: failedAttempts, blocked: !view.dialogs.isEmpty)
-                .contextMenu { menu(message: message, entryId: entryId) }
+            if message.role == .assistant {
+                // A context menu would claim the long press that starts a
+                // text selection; `/copy` covers copying the whole reply.
+                MessageView(message: message, tools: view.tools, cwd: cwd, failedAttempts: failedAttempts, blocked: !view.dialogs.isEmpty)
+            } else {
+                MessageView(message: message, tools: view.tools, cwd: cwd, failedAttempts: failedAttempts, blocked: !view.dialogs.isEmpty)
+                    .contextMenu { menu(message: message, entryId: entryId) }
+            }
         case let .compaction(_, tokens):
             TextDivider(text: tokens.map { "Context compacted from \(compactNumber($0)) tokens" } ?? "Context compacted")
         case let .streaming(partial):

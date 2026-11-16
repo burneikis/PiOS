@@ -20,12 +20,10 @@ struct MarkdownText: View {
                 case let .heading(_, content):
                     // Sized off the body: a heading marks a section of one
                     // answer, not a level of the page.
-                    Text(inline(content))
-                        .font(.system(size: 15, weight: .semibold))
+                    SelectableText(text: inline(content, font: .systemFont(ofSize: 15, weight: .semibold)))
                         .padding(.top, 4)
                 case let .quote(content):
-                    Text(inline(content))
-                        .foregroundStyle(Theme.muted)
+                    SelectableText(text: inline(content, color: UIColor(Theme.muted)))
                         .padding(.leading, 12)
                         .overlay(alignment: .leading) { Rectangle().fill(Color.white.opacity(0.15)).frame(width: 2) }
                 case let .table(content):
@@ -35,7 +33,7 @@ struct MarkdownText: View {
                 case .rule:
                     Rectangle().fill(Color.white.opacity(0.15)).frame(height: 1).padding(.vertical, 4)
                 case let .paragraph(content):
-                    Text(inline(content))
+                    SelectableText(text: inline(content))
                 }
             }
         }
@@ -47,21 +45,45 @@ struct MarkdownText: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Inline markdown, with code spans drawn as in the PWA: monospaced on
-    /// a dark well, and links underlined in the text colour.
-    private func inline(_ content: String) -> AttributedString {
+    /// Inline markdown in UIKit attributes, with code spans drawn as in the
+    /// PWA: monospaced on a dark well. Links take the text colour and an
+    /// underline from `SelectableText`.
+    private func inline(
+        _ content: String,
+        font: UIFont = .systemFont(ofSize: 15),
+        color: UIColor = UIColor(Theme.text)
+    ) -> NSAttributedString {
         let options = AttributedString.MarkdownParsingOptions(
             interpretedSyntax: .inlineOnlyPreservingWhitespace, failurePolicy: .returnPartiallyParsedIfPossible
         )
-        var result = (try? AttributedString(markdown: content, options: options)) ?? AttributedString(content)
-        for run in result.runs {
-            if let intent = run.inlinePresentationIntent, intent.contains(.code) {
-                result[run.range].font = Theme.mono(13.5) as Font
-                result[run.range].backgroundColor = Theme.well as Color
+        let parsed = (try? AttributedString(markdown: content, options: options)) ?? AttributedString(content)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = Theme.bodySpacing
+        let result = NSMutableAttributedString()
+        for run in parsed.runs {
+            let intent = run.inlinePresentationIntent ?? []
+            var attributes: [NSAttributedString.Key: Any] = [
+                .font: font, .foregroundColor: color, .paragraphStyle: paragraph,
+            ]
+            if intent.contains(.code) {
+                attributes[.font] = UIFont.monospacedSystemFont(ofSize: 13.5, weight: .regular)
+                attributes[.backgroundColor] = UIColor(Theme.well)
+            } else {
+                var traits: UIFontDescriptor.SymbolicTraits = []
+                if intent.contains(.stronglyEmphasized) { traits.insert(.traitBold) }
+                if intent.contains(.emphasized) { traits.insert(.traitItalic) }
+                if !traits.isEmpty,
+                   let descriptor = font.fontDescriptor.withSymbolicTraits(font.fontDescriptor.symbolicTraits.union(traits)) {
+                    attributes[.font] = UIFont(descriptor: descriptor, size: font.pointSize)
+                }
             }
-            if run.link != nil {
-                result[run.range].underlineStyle = Text.LineStyle.single
+            if intent.contains(.strikethrough) {
+                attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
             }
+            if let link = run.link {
+                attributes[.link] = link
+            }
+            result.append(NSAttributedString(string: String(parsed[run.range].characters), attributes: attributes))
         }
         return result
     }
