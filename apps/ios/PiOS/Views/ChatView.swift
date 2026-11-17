@@ -20,8 +20,9 @@ struct ChatView: View {
     @State private var allModels = false
     @State private var showInfo = false
     @State private var atBottom = true
-    /// Top of the dock on screen; the transcript's tail is read against it.
-    @State private var dockTop: CGFloat = .infinity
+    /// Top of the composer on screen. The tail is read against it, and the
+    /// scroll button hangs from it, clear of the status chips above.
+    @State private var composerTop: CGFloat = .infinity
     @FocusState private var composing: Bool
 
     var body: some View {
@@ -58,7 +59,7 @@ struct ChatView: View {
                         // from scroll geometry, so the dock's inset and the
                         // keyboard need no accounting.
                         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { y in
-                            setAtBottom(y <= dockTop + bottomSlack)
+                            setAtBottom(y <= composerTop + bottomSlack)
                         }
                         // Unloaded by the lazy stack: far from the tail.
                         .onDisappear { setAtBottom(false) }
@@ -77,13 +78,16 @@ struct ChatView: View {
                     sessionId: sessionId, view: view, summary: summary, isDraft: isDraft, composing: $composing,
                     onAllModels: { allModels = true },
                     onInfo: { showInfo = true },
-                    onSent: { withAnimation { proxy.scrollTo(bottomId, anchor: .bottom) } }
+                    onSent: { withAnimation { proxy.scrollTo(bottomId, anchor: .bottom) } },
+                    onComposerTop: { composerTop = $0 }
                 )
-                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { dockTop = $0 }
-                // Hung above the dock rather than in it: appearing mid-scroll
-                // must not resize the dock and so move the transcript.
-                .overlay(alignment: .top) {
-                    if !atBottom {
+            }
+            // Over the whole chat rather than hung off the dock: outside the
+            // dock's bounds it would not take taps, and inside them it would
+            // resize the dock and so move the transcript.
+            .overlay {
+                GeometryReader { geometry in
+                    if !atBottom, composerTop.isFinite {
                         Button {
                             withAnimation { proxy.scrollTo(bottomId, anchor: .bottom) }
                         } label: {
@@ -96,7 +100,10 @@ struct ChatView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Scroll to latest")
-                        .offset(y: -(36 + 10))
+                        .position(
+                            x: geometry.size.width / 2,
+                            y: composerTop - geometry.frame(in: .global).minY - 10 - 18
+                        )
                         .transition(.opacity.combined(with: .scale(scale: 0.8)))
                     }
                 }
@@ -330,6 +337,7 @@ struct Dock: View {
     var onAllModels: () -> Void
     var onInfo: () -> Void
     var onSent: () -> Void
+    var onComposerTop: (CGFloat) -> Void = { _ in }
 
     var body: some View {
         VStack(spacing: 8) {
@@ -341,6 +349,7 @@ struct Dock: View {
                 sessionId: sessionId, view: view, summary: summary, isDraft: isDraft, focused: composing,
                 onAllModels: onAllModels, onInfo: onInfo, onSent: onSent
             )
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { onComposerTop($0) }
             if !composing.wrappedValue {
                 ExtensionStatus(presentation: view.presentation, placement: "belowEditor", chips: false)
             }
