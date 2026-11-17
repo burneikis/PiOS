@@ -20,6 +20,8 @@ struct ChatView: View {
     @State private var allModels = false
     @State private var showInfo = false
     @State private var atBottom = true
+    /// Bumped to ask the transcript to scroll to its tail.
+    @State private var toBottom = 0
     /// Top of the composer on screen. The tail is read against it, and the
     /// scroll button hangs from it, clear of the status chips above.
     @State private var composerTop: CGFloat = .infinity
@@ -70,6 +72,7 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity)
             }
             .defaultScrollAnchor(.bottom)
+            .scrollsToBottom(on: toBottom, proxy: proxy, id: bottomId)
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.bg)
             // The dock floats over the transcript, which reads through it.
@@ -78,7 +81,7 @@ struct ChatView: View {
                     sessionId: sessionId, view: view, summary: summary, isDraft: isDraft, composing: $composing,
                     onAllModels: { allModels = true },
                     onInfo: { showInfo = true },
-                    onSent: { withAnimation { proxy.scrollTo(bottomId, anchor: .bottom) } },
+                    onSent: { toBottom += 1 },
                     onComposerTop: { composerTop = $0 }
                 )
             }
@@ -89,7 +92,7 @@ struct ChatView: View {
                 GeometryReader { geometry in
                     if !atBottom, composerTop.isFinite {
                         Button {
-                            withAnimation { proxy.scrollTo(bottomId, anchor: .bottom) }
+                            toBottom += 1
                         } label: {
                             Image(systemName: "chevron.down")
                                 .font(.system(size: 15, weight: .semibold))
@@ -296,6 +299,34 @@ struct ChatView: View {
                 Image(systemName: "ellipsis")
             }
         }
+    }
+}
+
+extension View {
+    /// Scrolls to the content's bottom edge on each new request. iOS 18's
+    /// scroll position does it directly; scrolling to the tail sentinel by
+    /// id can stall in a lazy stack anchored at the bottom.
+    @ViewBuilder
+    func scrollsToBottom(on request: Int, proxy: ScrollViewProxy, id: String) -> some View {
+        if #available(iOS 18.0, *) {
+            modifier(EdgeScroll(request: request))
+        } else {
+            onChange(of: request) { withAnimation { proxy.scrollTo(id, anchor: .bottom) } }
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+private struct EdgeScroll: ViewModifier {
+    let request: Int
+    // No initial target, so the bottom default anchor still places the
+    // transcript when it opens.
+    @State private var position = ScrollPosition(idType: String.self)
+
+    func body(content: Content) -> some View {
+        content
+            .scrollPosition($position)
+            .onChange(of: request) { withAnimation { position.scrollTo(edge: .bottom) } }
     }
 }
 
