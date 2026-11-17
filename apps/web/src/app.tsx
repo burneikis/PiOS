@@ -21,7 +21,7 @@ import { SessionList } from "./components/session-list.tsx";
 import { SettingsView } from "./components/settings-view.tsx";
 import { loadSettings, saveSettings, SettingsProvider, type Settings } from "./settings.ts";
 import { adoptSandboxMachine } from "./sandbox.ts";
-import { loadDrafts, saveDrafts, type Draft } from "./drafts.ts";
+import { isEmptyDraft, loadDrafts, saveDrafts, type Draft } from "./drafts.ts";
 import { useUnreadMarks } from "./seen.ts";
 import { useAttentionReport } from "./attention.ts";
 import { useLaunchSession } from "./launch-session.ts";
@@ -131,6 +131,15 @@ function Workspace({ machine, settings, onSettingsChange, onForget }: {
     const kept = drafts.filter((d) => !live.has(d.id));
     if (kept.length !== drafts.length) updateDrafts(kept);
   }, [state.sessions, drafts]);
+
+  // An empty draft left behind holds no work; keeping it would only pile up
+  // "New session" rows. Also runs at launch for ones left by earlier visits.
+  useEffect(() => {
+    const kept = drafts.filter(
+      (d) => d.id === activeId || !isEmptyDraft(d.id, client.outbox.list(d.id).length),
+    );
+    if (kept.length !== drafts.length) updateDrafts(kept);
+  }, [activeId]);
 
   // A rewind branches into a session of its own, so the app follows it there
   // and leaves the conversation it came from in the list, intact.

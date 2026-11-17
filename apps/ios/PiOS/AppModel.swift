@@ -80,6 +80,7 @@ final class AppModel {
         composerTexts = readVersioned(storage, "pios.composer", version: 1, fallback: [String: String]())
         connection = client.supervisor.state
         outbox = client.outbox.entries
+        for id in drafts.keys { dropIfEmpty(id) }
 
         subscriptions.append(client.supervisor.stateChanged.add { [weak self] state in self?.onConnection(state) })
         subscriptions.append(client.outbox.changed.add { [weak self] entries in self?.outbox = entries })
@@ -125,8 +126,7 @@ final class AppModel {
     func activate(_ machine: Machine) {
         machines.activeId = machine.id
         saveMachines()
-        selection = nil
-        path = []
+        leaveSelection()
         seen = readVersioned(storage, seenKey, version: 1, fallback: [String: Double]())
         connectActiveMachine()
     }
@@ -138,8 +138,7 @@ final class AppModel {
         machines.machines.removeAll { $0.id == machine.id }
         if machines.activeId == machine.id { machines.activeId = machines.machines.first?.id }
         saveMachines()
-        selection = nil
-        path = []
+        leaveSelection()
         connectActiveMachine()
     }
 
@@ -183,7 +182,10 @@ final class AppModel {
 
     /// Opens a session; on a phone that also puts the list away.
     func open(_ sessionId: String?) {
-        if sessionId != selection { path = [] }
+        if sessionId != selection {
+            path = []
+            if let previous = selection { dropIfEmpty(previous) }
+        }
         selection = sessionId
         drawerOpen = false
         if let sessionId, let summary = summary(sessionId) { markSeen(summary) }
@@ -222,6 +224,22 @@ final class AppModel {
     func create(for sessionId: String) -> SessionCreate? {
         guard let draft = drafts[sessionId], summary(sessionId) == nil else { return nil }
         return SessionCreate(cwd: draft.cwd, trustProject: draft.trustProject)
+    }
+
+    private func leaveSelection() {
+        if let previous = selection { dropIfEmpty(previous) }
+        selection = nil
+        path = []
+    }
+
+    /// A draft left with nothing typed and nothing queued holds no work, so
+    /// keeping it would only pile up "New session" rows.
+    private func dropIfEmpty(_ sessionId: String) {
+        guard drafts[sessionId] != nil, summary(sessionId) == nil,
+              composerText(sessionId).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !client.outbox.entries.contains(where: { $0.sessionId == sessionId })
+        else { return }
+        discardDraft(sessionId)
     }
 
     func discardDraft(_ sessionId: String) {

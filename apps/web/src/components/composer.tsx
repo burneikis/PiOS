@@ -2,6 +2,7 @@ import type { ImageContent, ModelOption, StreamingBehavior } from "@pios/protoco
 import type { SessionCreate } from "@pios/client-core";
 import { useEffect, useRef, useState } from "react";
 import { useClient } from "../client-provider.tsx";
+import { COMPOSER_TEXT_PREFIX } from "../drafts.ts";
 import { useSettings } from "../settings.ts";
 import { browserStorage } from "../storage.ts";
 import { CommandMenu, slashQuery, useSlashCommands, type MenuEntry } from "./command-menu.tsx";
@@ -11,8 +12,6 @@ import { nativeCommandFor, openSelect, type NativeCommand } from "./native-comma
 import { ModelDialog } from "./model-dialog.tsx";
 import { ModelPicker } from "./model-picker.tsx";
 import { ThinkingPicker } from "./thinking-picker.tsx";
-
-const DRAFT_PREFIX = "pios.draft.";
 
 /**
  * Composes a prompt and hands it to the outbox.
@@ -122,7 +121,7 @@ export function Composer({
   useEffect(resize, [text]);
 
   useEffect(() => {
-    setText(browserStorage.get(DRAFT_PREFIX + sessionId) ?? "");
+    setText(browserStorage.get(COMPOSER_TEXT_PREFIX + sessionId) ?? "");
     setImages([]);
   }, [sessionId]);
 
@@ -131,14 +130,14 @@ export function Composer({
   useEffect(() => {
     if (editorText === undefined) return;
     setText(editorText);
-    browserStorage.set(DRAFT_PREFIX + sessionId, editorText);
+    browserStorage.set(COMPOSER_TEXT_PREFIX + sessionId, editorText);
   }, [editorText, editorTextKey, sessionId]);
 
   function edit(value: string, caret?: number) {
     setText(value);
     setActive(0);
     setMention(caret === undefined ? null : mentionAt(value, caret));
-    const key = DRAFT_PREFIX + sessionId;
+    const key = COMPOSER_TEXT_PREFIX + sessionId;
     if (value) browserStorage.set(key, value);
     else browserStorage.remove(key);
   }

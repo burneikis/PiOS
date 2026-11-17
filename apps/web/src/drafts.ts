@@ -14,6 +14,14 @@ export interface Draft {
   createdAt: number;
 }
 
+/** Where the composer keeps unsent text, per session id. */
+export const COMPOSER_TEXT_PREFIX = "pios.draft.";
+
+/** Nothing typed and nothing queued: leaving it loses no work. */
+export function isEmptyDraft(id: string, queued: number): boolean {
+  return queued === 0 && !(browserStorage.get(COMPOSER_TEXT_PREFIX + id) ?? "").trim();
+}
+
 const key = (machineId: string) => `pios.drafts.${machineId}`;
 
 export function loadDrafts(machineId: string): Draft[] {
