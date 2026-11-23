@@ -200,9 +200,6 @@ struct ChatView: View {
             || allModels || showInfo || model.viewedImage != nil
     }
 
-    /// Within this much of the tail still counts as reading it.
-    private let bottomSlack: CGFloat = 48
-
     /// Written only on a change: the sentinel reports every scroll frame,
     /// and each write would re-render the whole transcript.
     private func setAtBottom(_ value: Bool) {
@@ -316,19 +313,60 @@ extension View {
     }
 }
 
+/// Also holds the tail in place. When the tail item changes identity
+/// (streaming, then live, then persisted) the lazy stack re-measures it and
+/// can leave the offset past the new end, showing blank space until touched.
 @available(iOS 18.0, *)
 private struct EdgeScroll: ViewModifier {
     let request: Int
     // No initial target, so the bottom default anchor still places the
     // transcript when it opens.
     @State private var position = ScrollPosition(idType: String.self)
+    @State private var phase: ScrollPhase = .idle
+    /// Only the user's own scrolling changes this; layout shifts do not.
+    @State private var following = true
 
     func body(content: Content) -> some View {
         content
             .scrollPosition($position)
-            .onChange(of: request) { withAnimation { position.scrollTo(edge: .bottom) } }
+            .onScrollPhaseChange { _, new in phase = new }
+            .onScrollGeometryChange(for: TailGap.self, of: TailGap.init) { _, gap in hold(gap) }
+            .onChange(of: request) {
+                following = true
+                withAnimation { position.scrollTo(edge: .bottom) }
+            }
+    }
+
+    private func hold(_ gap: TailGap) {
+        switch phase {
+        case .tracking, .interacting, .decelerating:
+            let near = gap.below <= bottomSlack
+            if following != near { following = near }
+        case .animating:
+            break
+        default:
+            guard gap.scrollable else { return }
+            if gap.below < -1 || (following && gap.below > 1) { position.scrollTo(edge: .bottom) }
+        }
     }
 }
+
+/// How much content lies below the visible area; negative is blank space
+/// past the end.
+private struct TailGap: Equatable {
+    var below: CGFloat
+    var scrollable: Bool
+
+    init(_ geometry: ScrollGeometry) {
+        let insets = geometry.contentInsets.top + geometry.contentInsets.bottom
+        let end = geometry.contentSize.height + geometry.contentInsets.bottom
+        below = (end - geometry.contentOffset.y - geometry.containerSize.height).rounded()
+        scrollable = geometry.contentSize.height + insets > geometry.containerSize.height
+    }
+}
+
+/// Within this much of the tail still counts as reading it.
+private let bottomSlack: CGFloat = 48
 
 /// A screen over the chat. `files(nil)` is the project root.
 enum ChatRoute: Hashable {
