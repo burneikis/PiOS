@@ -353,6 +353,7 @@ private struct EdgeScroll: ViewModifier {
 
 /// How much content lies below the visible area; negative is blank space
 /// past the end.
+@available(iOS 18.0, *)
 private struct TailGap: Equatable {
     var below: CGFloat
     var scrollable: Bool
