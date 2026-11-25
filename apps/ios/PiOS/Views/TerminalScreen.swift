@@ -6,8 +6,9 @@ import UIKit
 /// The interactive shell in the session directory, on a daemon-owned PTY.
 ///
 /// The shell outlives this screen, the socket and the app: leaving detaches,
-/// and coming back replays what was missed. SwiftTerm's own key row (esc,
-/// ctrl, tab, arrows) sits above the keyboard.
+/// and coming back replays what was missed. The shell ending, by `exit` here
+/// or a close from any device, leaves the screen. SwiftTerm's own key row
+/// (esc, ctrl, tab, arrows) sits above the keyboard.
 struct TerminalScreen: View {
     let terminalId: String
     let cwd: String
@@ -24,11 +25,6 @@ struct TerminalScreen: View {
                 }
                 if let failure = session.failure {
                     StatusLine(text: failure, tone: .error)
-                }
-                if let exit = session.exitText {
-                    StatusLine(text: exit, tone: .muted) {
-                        Button("Restart") { session.restart() }
-                    }
                 }
             }
             .padding(.horizontal, 12)
@@ -47,18 +43,23 @@ struct TerminalScreen: View {
                 }
                 Menu {
                     Button(role: .destructive) { confirmClose = true } label: { Label("Close the shell", systemImage: "xmark") }
-                        .disabled(session.exitText != nil)
                 } label: {
                     Image(systemName: "ellipsis")
                 }
             }
         }
         .confirmationDialog("Close the shell?", isPresented: $confirmClose, titleVisibility: .visible) {
-            Button("Close shell", role: .destructive) { session.kill() }
+            Button("Close shell", role: .destructive) {
+                session.kill()
+                model.leaveTerminal()
+            }
         } message: {
             Text("It ends for every device attached to it.")
         }
-        .onAppear { session.attach(client: model.client, terminalId: terminalId, cwd: cwd) }
+        .onAppear {
+            session.onEnded = { model.leaveTerminal() }
+            session.attach(client: model.client, terminalId: terminalId, cwd: cwd)
+        }
         .onDisappear { session.detach() }
     }
 }
@@ -67,9 +68,10 @@ struct TerminalScreen: View {
 @Observable
 @MainActor
 final class TerminalSession: TerminalSink {
-    var exitText: String?
     var failure: String?
     var title: String?
+    /// The shell exited; there is nothing left on this screen to show.
+    @ObservationIgnored var onEnded: (() -> Void)?
 
     @ObservationIgnored weak var view: TerminalView?
     @ObservationIgnored private var handle: TerminalHandle?
@@ -102,12 +104,6 @@ final class TerminalSession: TerminalSink {
     @discardableResult
     func write(_ data: String) -> Bool { handle?.write(data) ?? false }
 
-    func restart() {
-        exitText = nil
-        failure = nil
-        handle?.restart()
-    }
-
     func detach() {
         handle?.detach()
         handle = nil
@@ -130,7 +126,6 @@ final class TerminalSession: TerminalSink {
     // MARK: TerminalSink
 
     func reset() {
-        exitText = nil
         backlog = ""
         view?.feed(text: "\u{1B}c")
     }
@@ -140,7 +135,7 @@ final class TerminalSession: TerminalSink {
     }
 
     func exit(code: Int, signal: Int?) {
-        exitText = signal.map { "Shell ended by signal \($0)." } ?? "Shell exited with code \(code)."
+        onEnded?()
     }
 
     func failed(_ message: String) {

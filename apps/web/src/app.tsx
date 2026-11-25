@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SessionSummary } from "@pios/protocol";
-import { ClientProvider, useClient, useSupervisorState } from "./client-provider.tsx";
+import {
+  ClientProvider,
+  useClient,
+  useLiveTerminals,
+  useSupervisorState,
+} from "./client-provider.tsx";
 import {
   activeMachine,
   deviceRevoked,
@@ -84,6 +89,7 @@ function Workspace({ machine, settings, onSettingsChange, onForget }: {
 }) {
   const client = useClient();
   const state = useSupervisorState();
+  const shells = useLiveTerminals();
   const { activeId, setActiveId } = useLaunchSession(machine);
   const seen = useUnreadMarks(machine.id, state.sessions, state.sync === "synced", activeId);
 
@@ -277,6 +283,7 @@ function Workspace({ machine, settings, onSettingsChange, onForget }: {
           drafts={drafts}
           activeId={activeId}
           seen={seen}
+          shells={shells}
           query={search}
           loading={state.transport === "connected" && state.sessions.length === 0}
           hasMore={state.hasMoreSessions}

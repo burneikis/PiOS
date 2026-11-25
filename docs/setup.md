@@ -116,6 +116,7 @@ as `~/.config/systemd/user/pios-server.service.d/override.conf`:
 | `PIOS_DATA_DIR` | `~/.pios` | Device tokens (hashed), push keys, relay key, session index cache. |
 | `PIOS_SESSION_DIR` | `~/.pi/agent/sessions` | pi's session store. This is the session list. |
 | `PI_AGENT_DIR` | `~/.pi/agent` | pi's config: model scope and project trust. |
+| `PIOS_TERMINAL_IDLE_MINUTES` | `720` | A terminal with no device attached for this long is closed. `0` keeps it until it exits. |
 | `PIOS_HOST` | `subprocess` | `in-process` runs pi inside the daemon. One crash then takes every session down. |
 | `PIOS_WEB_DIR` | `apps/web/dist` | Built PWA to serve. |
 | `PIOS_PUSH_SUBJECT` | relay URL | VAPID subject for Web Push. |

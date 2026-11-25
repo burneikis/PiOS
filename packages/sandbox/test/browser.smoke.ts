@@ -111,6 +111,29 @@ describe("the web app against the sandbox", () => {
     await browser.waitFor(".chat");
   });
 
+  it("marks a running shell in the list and leaves the screen when it ends", async () => {
+    const marked = () => browser.eval<boolean>(`document.querySelector(".sessions .shell-mark") !== null`);
+    const openTerminal = async () => {
+      assert.ok(await browser.tap('button[aria-label="session menu"]'));
+      await until(() => browser.tapText("Terminal"), "the terminal entry");
+      await browser.waitFor(".terminal-view");
+    };
+
+    await openTerminal();
+    await until(marked, "the shell mark");
+    // As if typed: the shell ending on its own is what is under test.
+    await until(async () => Boolean(sandbox.server.terminals.get("sbx-files")), "the shell");
+    sandbox.server.terminals.get("sbx-files")!.write("exit\n");
+    await browser.waitFor(".chat");
+    await until(async () => !(await marked()), "the mark to clear");
+
+    await openTerminal();
+    assert.ok(await browser.tap('.terminal-view button[aria-label="close the shell"]'));
+    assert.ok(await browser.tapText("Close shell"));
+    await browser.waitFor(".chat");
+    await until(async () => !(await marked()), "the mark to clear after a close");
+  });
+
   it("keeps an open editor through a streaming turn", async () => {
     assert.ok(await browser.tap('button[aria-label="session menu"]'));
     assert.ok(await browser.tap(".menu-popover .list-row"));

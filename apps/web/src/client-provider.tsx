@@ -74,6 +74,17 @@ export function useSupervisorState(): SupervisorState {
   return state;
 }
 
+/** Ids of the shells running on the machine, from any device. */
+export function useLiveTerminals(): ReadonlySet<string> {
+  const client = useClient();
+  const [ids, setIds] = useState<ReadonlySet<string>>(() => new Set(client.terminals.live().keys()));
+  useEffect(() => {
+    setIds(new Set(client.terminals.live().keys()));
+    return client.terminals.subscribeLive((running) => setIds(new Set(running.keys())));
+  }, [client]);
+  return ids;
+}
+
 function useOutbox(): OutboxEntry[] {
   const client = useClient();
   const [entries, setEntries] = useState<OutboxEntry[]>(() => client.outbox.list());

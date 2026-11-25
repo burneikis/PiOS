@@ -32,6 +32,8 @@ final class AppModel {
     /// Models, commands and stats arrived.
     private(set) var metadataRevision = 0
     private(set) var drafts: [String: Draft] = [:]
+    /// Sessions with a shell running on the machine, from any device.
+    private(set) var liveTerminals: Set<String> = []
     private(set) var selection: String?
     /// Screens pushed over the open chat. One typed path for the whole
     /// stack: mixing item-bound and value-bound destinations leaves SwiftUI
@@ -87,6 +89,7 @@ final class AppModel {
         subscriptions.append(client.sessions.changed.add { [weak self] sessionId in self?.markChanged(sessionId) })
         subscriptions.append(client.metadataChanged.add { [weak self] _ in self?.metadataRevision += 1 })
         subscriptions.append(client.notices.add { [weak self] notice in self?.onNotice(notice) })
+        subscriptions.append(client.terminals.liveChanged.add { [weak self] live in self?.liveTerminals = Set(live.keys) })
 
         monitor.pathUpdateHandler = { [weak self] path in
             let online = path.status == .satisfied
@@ -178,6 +181,11 @@ final class AppModel {
         drafts[id] = Draft(sessionId: id, cwd: cwd, trustProject: trustProject)
         saveDrafts()
         open(id)
+    }
+
+    /// Pops the terminal, if it is the screen on top.
+    func leaveTerminal() {
+        if path.last == .terminal { path.removeLast() }
     }
 
     /// Opens a session; on a phone that also puts the list away.

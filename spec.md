@@ -498,11 +498,17 @@ there is still one retry owner and no second auth path.
 - **Input is never queued.** Keystrokes replayed after a reconnect would land
   in whatever the shell is doing by then. Offline keys are dropped and the
   screen says so.
-- **Exit is sticky.** Re-attaching to an exited shell shows how it ended;
-  only an explicit `restart` starts a new one.
+- **Exit leaves the screen.** A shell ending, by `exit` or by a close from
+  any device, takes every attached client back to the chat. A reconnect
+  holding a cursor into an exited shell still learns how it ended; any other
+  open of that id starts a new shell.
 - **Backpressure.** A socket behind on output pauses the PTY, so a runaway
   `yes` blocks on the PTY instead of filling daemon memory.
 - A cap on live shells, since each is a process the phone may forget about.
+- **Forgotten shells are visible and reaped.** The daemon pushes the set of
+  running shells (`terminals`) after `welcome` and on every change, and the
+  session list marks rows that have one. A shell with no device attached for
+  `PIOS_TERMINAL_IDLE_MINUTES` (default 12 h) is closed.
 
 ---
 

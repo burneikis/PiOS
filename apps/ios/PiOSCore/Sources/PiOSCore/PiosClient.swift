@@ -446,7 +446,7 @@ public final class PiosClient {
             if sessions.needsFullRefetch(sessionId, leafId: leafId) { sessions.clear(sessionId) }
             if subscribed.contains(sessionId) { resync(sessionId) }
             if commandsWanted.contains(sessionId) { send(.listCommands(sessionId: sessionId)) }
-        case .unhandled, .terminalAttached, .terminalOutput, .terminalExit:
+        case .unhandled, .terminalAttached, .terminalOutput, .terminalExit, .terminals:
             break
         }
     }

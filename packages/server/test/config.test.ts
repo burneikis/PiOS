@@ -18,6 +18,13 @@ test("an explicit host mode wins over the environment", () => {
   }
 });
 
+test("terminals are reaped after twelve idle hours unless configured", () => {
+  assert.equal(defaultConfig().terminalIdleMs, 12 * 60 * 60_000);
+  assert.equal(withEnv("PIOS_TERMINAL_IDLE_MINUTES", "30").terminalIdleMs, 30 * 60_000);
+  assert.equal(withEnv("PIOS_TERMINAL_IDLE_MINUTES", "0").terminalIdleMs, 0);
+  assert.equal(withEnv("PIOS_TERMINAL_IDLE_MINUTES", "soon").terminalIdleMs, 12 * 60 * 60_000);
+});
+
 test("the daemon binds loopback unless told otherwise", () => {
   assert.equal(defaultConfig().host, "127.0.0.1");
   assert.equal(withEnv("PIOS_BIND", "0.0.0.0").host, "0.0.0.0");

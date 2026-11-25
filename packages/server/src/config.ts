@@ -33,6 +33,11 @@ export interface ServerConfig {
    * survives: its transcript is on disk and the next command starts it again.
    */
   sessionIdleMs: number;
+  /**
+   * How long a terminal may run with no device attached before it is closed.
+   * 0 keeps it until it exits or the daemon stops.
+   */
+  terminalIdleMs: number;
   /** Cap on a single upload, so a phone cannot fill the disk. */
   maxUploadBytes: number;
   /** How long a socket has to authenticate before it is closed. */
@@ -108,6 +113,7 @@ export function defaultConfig(overrides: Partial<ServerConfig> = {}): ServerConf
       overrides.usageCachePath ?? join(homedir(), ".claude", ".pi-usage-cache.json"),
     sessionHostMode: overrides.sessionHostMode ?? sessionHostMode(process.env.PIOS_HOST),
     sessionIdleMs: overrides.sessionIdleMs ?? 30 * 60_000,
+    terminalIdleMs: overrides.terminalIdleMs ?? terminalIdleMs(process.env.PIOS_TERMINAL_IDLE_MINUTES),
     maxUploadBytes: overrides.maxUploadBytes ?? 25 * 1024 * 1024,
     helloTimeoutMs: overrides.helloTimeoutMs ?? 5_000,
     activityTtlMs: overrides.activityTtlMs ?? 45_000,
@@ -129,6 +135,12 @@ export function defaultConfig(overrides: Partial<ServerConfig> = {}): ServerConf
  */
 function sessionHostMode(requested: string | undefined): SessionHostMode {
   return requested === "in-process" ? "in-process" : "subprocess";
+}
+
+/** Twelve hours unless set: long enough for a build left running overnight. */
+function terminalIdleMs(minutes: string | undefined): number {
+  const parsed = minutes === undefined || minutes.trim() === "" ? NaN : Number(minutes);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed * 60_000 : 12 * 60 * 60_000;
 }
 
 /** The workspace build output, when the daemon is running from the repo. */

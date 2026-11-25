@@ -242,3 +242,12 @@ test("a terminal open defaults to attaching, and sizes are bounded", () => {
   });
   assert.equal(output.type === "terminal_output" && output.data, "\u001b[32mok\u2028\r\n");
 });
+
+test("the live shell list carries where each one runs", () => {
+  const frame = ServerFrameSchema.parse({
+    v: WIRE_VERSION,
+    type: "terminals",
+    terminals: [{ terminalId: "s1", cwd: "/w", startedAt: 1700000000000 }],
+  });
+  assert.deepEqual(frame.type === "terminals" && frame.terminals.map((t) => t.terminalId), ["s1"]);
+});

@@ -857,6 +857,15 @@ button.link {
   padding-right: 84px;
 }
 
+/* Under the badge, so it never displaces the state it sits beside. */
+.sessions .shell-mark {
+  position: absolute;
+  right: 12px;
+  bottom: 9px;
+  display: flex;
+  color: var(--ok);
+}
+
 .sessions .name {
   font-weight: 500;
 }

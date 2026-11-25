@@ -129,6 +129,7 @@ export class Connection {
       // for on every handshake; this is only what is running right now.
       sessions: this.deps.registry.list().map((info) => liveSummary(info)),
     });
+    this.sendTerminals();
   }
 
   private async dispatch(frame: Exclude<ClientFrame, { type: "hello" }>): Promise<void> {
@@ -196,7 +197,7 @@ export class Connection {
   /**
    * Attaches this socket to a shell, starting it if need be, and replays what
    * the client does not hold. Nothing here is deduped: opening is idempotent
-   * by id, and a restart only ever replaces a shell that has exited.
+   * by id, and only a shell that has exited is ever replaced.
    */
   private openTerminal(frame: FrameOf<"terminal_open">): void {
     const host = this.deps.terminals;
@@ -208,6 +209,7 @@ export class Connection {
         cols: frame.cols,
         rows: frame.rows,
         restart: frame.restart,
+        since: frame.since,
       });
     } catch (error) {
       return this.fail(frame.commandId, "bad_request", errorMessage(error));
@@ -752,6 +754,17 @@ export class Connection {
   sendSessions(): void {
     if (!this.device) return;
     this.send({ v: WIRE_VERSION, type: "sessions_changed" });
+  }
+
+  /** The shells still running. Ignored before `hello`. */
+  sendTerminals(): void {
+    const host = this.deps.terminals;
+    if (!this.device || !host) return;
+    this.send({
+      v: WIRE_VERSION,
+      type: "terminals",
+      terminals: host.live().map((t) => ({ terminalId: t.id, cwd: t.cwd, startedAt: t.startedAt })),
+    });
   }
 
   private sendSessionState(commandId: string, session: PiSession): void {

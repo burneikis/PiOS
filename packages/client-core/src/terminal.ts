@@ -1,4 +1,5 @@
-import type { ClientFrame, ServerFrame, TerminalCursor } from "@pios/protocol";
+import type { ClientFrame, LiveTerminal, ServerFrame, TerminalCursor } from "@pios/protocol";
+import { Listeners } from "./listeners.ts";
 
 type Command = ClientFrame extends infer Frame
   ? Frame extends { commandId: string; type: `terminal_${string}` }
@@ -61,6 +62,9 @@ interface Attachment {
  */
 export class TerminalChannel {
   private readonly attachments = new Map<string, Attachment>();
+  /** Shells running on the machine, whoever opened them, by id. */
+  private running = new Map<string, LiveTerminal>();
+  private readonly runningHandlers = new Listeners<[running: ReadonlyMap<string, LiveTerminal>]>();
   private readonly send: (command: Command, commandId: string) => boolean;
   private readonly generateId: () => string;
 
@@ -104,6 +108,16 @@ export class TerminalChannel {
     };
   }
 
+  /** The shells running on the machine, as of the daemon's last word. */
+  live(): ReadonlyMap<string, LiveTerminal> {
+    return this.running;
+  }
+
+  /** Fires with the whole set whenever a shell starts or ends. */
+  subscribeLive(handler: (running: ReadonlyMap<string, LiveTerminal>) => void): () => void {
+    return this.runningHandlers.add(handler);
+  }
+
   /** Re-attaches everything after a reconnect, each from its own cursor. */
   reconnected(): void {
     for (const [terminalId, attachment] of this.attachments) {
@@ -119,6 +133,10 @@ export class TerminalChannel {
         return true;
       case "terminal_output":
         this.onOutput(frame);
+        return true;
+      case "terminals":
+        this.running = new Map(frame.terminals.map((t) => [t.terminalId, t]));
+        this.runningHandlers.emit(this.running);
         return true;
       case "terminal_exit":
         this.attachments.get(frame.terminalId)?.sink.exit({

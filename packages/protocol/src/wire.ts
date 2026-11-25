@@ -244,12 +244,13 @@ export const ClientFrameSchema = z.discriminatedUnion("type", [
     cwd: z.string(),
     cols: TerminalCellsSchema,
     rows: TerminalCellsSchema,
-    /** Where the client's copy of the output ends. Absent replays everything. */
-    since: TerminalCursorSchema.optional(),
     /**
-     * Replaces an exited shell with a fresh one. Never implied: a reconnect
-     * that silently restarted a finished shell would lose its exit status.
+     * Where the client's copy of the output ends. Absent replays everything.
+     * An exited shell is only re-attached for a cursor into it, so a
+     * reconnect still learns how it ended; a fresh open starts a new shell.
      */
+    since: TerminalCursorSchema.optional(),
+    /** Replaces an exited shell even for a cursor into it. */
     restart: z.boolean().default(false),
   }),
   /** Keystrokes and pastes. Not acked: a reply per key doubles the traffic. */
@@ -541,6 +542,21 @@ export const ServerFrameSchema = z.discriminatedUnion("type", [
     offset: z.number(),
     data: z.string(),
   }),
+  /**
+   * Every shell still running, sent after `welcome` and again whenever one
+   * starts or ends, so a shell left behind is visible without opening it.
+   */
+  ServerEnvelope({
+    type: z.literal("terminals"),
+    terminals: z.array(
+      z.object({
+        terminalId: z.string(),
+        cwd: z.string(),
+        /** Daemon epoch ms. */
+        startedAt: z.number(),
+      }),
+    ),
+  }),
   /** The shell is gone. Sent once live, and again on every later attach. */
   ServerEnvelope({
     type: z.literal("terminal_exit"),
@@ -569,6 +585,7 @@ export const ServerFrameSchema = z.discriminatedUnion("type", [
   }),
 ]);
 export type ServerFrame = z.infer<typeof ServerFrameSchema>;
+export type LiveTerminal = Extract<ServerFrame, { type: "terminals" }>["terminals"][number];
 
 export function isWireVersionMismatch(raw: unknown): boolean {
   return (

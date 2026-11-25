@@ -100,6 +100,18 @@ final class TerminalTests: XCTestCase {
         XCTAssertEqual(sink.failure, "too many shells")
     }
 
+    func testRunningShellsAreTrackedWhoeverOpenedThem() async {
+        let (client, pool) = await connected()
+        var seen: [[String]] = []
+        let cancel = client.terminals.liveChanged.add { seen.append($0.keys.sorted()) }
+        pool.last.emit(["type": "terminals", "terminals": [["terminalId": "s1", "cwd": "/w", "startedAt": 1]]])
+        XCTAssertEqual(client.terminals.live["s1"]?.cwd, "/w")
+        pool.last.emit(["type": "terminals", "terminals": []])
+        XCTAssertEqual(seen, [["s1"], []])
+        XCTAssertTrue(client.terminals.live.isEmpty)
+        cancel()
+    }
+
     func testInputIsNeverQueuedAndDetachStopsTheStream() async {
         let (client, pool) = await connected()
         let sink = RecordingSink()

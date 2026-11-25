@@ -358,6 +358,8 @@ public struct ServerFrame: Sendable {
         /// `offset` is where `data` starts in the shell's output, in UTF-16 units.
         case terminalOutput(terminalId: String, offset: Int, data: String)
         case terminalExit(terminalId: String, exitCode: Int, signal: Int?)
+        /// Every shell still running, after `welcome` and on any change.
+        case terminals([LiveTerminal])
         /// Terminal frames and anything newer than this build.
         case unhandled(String)
     }
@@ -464,6 +466,8 @@ public struct ServerFrame: Sendable {
             body = .terminalOutput(terminalId: json["terminalId"]?.string ?? "", offset: json["offset"]?.int ?? 0, data: json["data"]?.string ?? "")
         case "terminal_exit":
             body = .terminalExit(terminalId: json["terminalId"]?.string ?? "", exitCode: json["exitCode"]?.int ?? 0, signal: json["signal"]?.int)
+        case "terminals":
+            body = .terminals(json["terminals"]?.array?.compactMap(LiveTerminal.init(json:)) ?? [])
         default:
             body = .unhandled(type)
         }

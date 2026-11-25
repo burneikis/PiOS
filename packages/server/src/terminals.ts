@@ -34,10 +34,18 @@ export interface TerminalHostOptions {
   maxTerminals?: number;
   /** Output kept for a client that attaches late, in UTF-16 units. */
   scrollback?: number;
+  /**
+   * How long a shell may run with no device attached before it is closed.
+   * The phone cannot see a shell it has navigated away from, so one that is
+   * never revisited would otherwise run until the daemon stops. 0 keeps
+   * shells until they exit.
+   */
+  idleMs?: number;
 }
 
 const DEFAULT_MAX = 8;
 const DEFAULT_SCROLLBACK = 512 * 1024;
+const DEFAULT_IDLE_MS = 12 * 60 * 60_000;
 /** A PTY read is often a few bytes; one frame per read floods the relay. */
 const COALESCE_MS = 4;
 const CONGESTION_POLL_MS = 50;
@@ -56,6 +64,7 @@ export class Terminal {
   readonly cwd: string;
   /** Distinguishes this shell from a later one under the same id. */
   readonly instance = randomUUID();
+  readonly startedAt = Date.now();
 
   private readonly pty: IPty;
   private readonly listeners = new Set<TerminalListener>();
@@ -68,19 +77,34 @@ export class Terminal {
   private flushTimer: NodeJS.Timeout | null = null;
   private congestionTimer: NodeJS.Timeout | null = null;
   private killTimer: NodeJS.Timeout | null = null;
+  private idleTimer: NodeJS.Timeout | null = null;
+  private readonly idleMs: number;
+  private readonly hooks: TerminalHooks;
   private exitInfo: TerminalExit | null = null;
   private cols: number;
   private rows: number;
 
   constructor(
     id: string,
-    options: { cwd: string; cols: number; rows: number; shell: string; args: string[]; env: Record<string, string>; scrollback: number },
+    options: {
+      cwd: string;
+      cols: number;
+      rows: number;
+      shell: string;
+      args: string[];
+      env: Record<string, string>;
+      scrollback: number;
+      idleMs?: number;
+    },
+    hooks: TerminalHooks = {},
   ) {
     this.id = id;
     this.cwd = options.cwd;
     this.cols = options.cols;
     this.rows = options.rows;
     this.scrollback = options.scrollback;
+    this.idleMs = options.idleMs ?? 0;
+    this.hooks = hooks;
     this.pty = spawn(options.shell, options.args, {
       name: "xterm-256color",
       cols: options.cols,
@@ -90,6 +114,7 @@ export class Terminal {
     });
     this.pty.onData((data) => this.onData(data));
     this.pty.onExit(({ exitCode, signal }) => this.onExit({ exitCode, signal: signal || undefined }));
+    this.armIdle();
   }
 
   get exited(): TerminalExit | null {
@@ -114,6 +139,7 @@ export class Terminal {
   attach(listener: TerminalListener, since?: { instance: string; offset: number }): TerminalReplay {
     this.flush();
     this.listeners.add(listener);
+    this.disarmIdle();
     const continuous =
       since !== undefined &&
       since.instance === this.instance &&
@@ -125,6 +151,7 @@ export class Terminal {
 
   detach(listener: TerminalListener): void {
     this.listeners.delete(listener);
+    this.armIdle();
   }
 
   write(data: string): void {
@@ -157,6 +184,22 @@ export class Terminal {
     this.killTimer = setTimeout(() => this.signal("SIGKILL"), KILL_GRACE_MS);
     // The PTY holds the loop open on its own while the shell lives.
     this.killTimer.unref();
+  }
+
+  /** Counts down while nobody is attached; any attach starts it over. */
+  private armIdle(): void {
+    if (this.idleMs <= 0 || this.exitInfo || this.listeners.size > 0 || this.idleTimer) return;
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      if (this.listeners.size === 0) this.hooks.idle?.();
+    }, this.idleMs);
+    // Never the reason the daemon stays up.
+    this.idleTimer.unref();
+  }
+
+  private disarmIdle(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
   }
 
   private signal(name?: string): void {
@@ -236,20 +279,31 @@ export class Terminal {
   private onExit(info: TerminalExit): void {
     this.flush();
     this.exitInfo = info;
+    this.disarmIdle();
     if (this.killTimer) clearTimeout(this.killTimer);
     this.killTimer = null;
     if (this.congestionTimer) clearInterval(this.congestionTimer);
     this.congestionTimer = null;
     for (const listener of this.listeners) listener.exit(info);
+    this.hooks.exited?.();
   }
+}
+
+interface TerminalHooks {
+  /** Nobody has been attached for the idle timeout. */
+  idle?: () => void;
+  exited?: () => void;
 }
 
 /** Every shell the daemon holds, by client-chosen id. */
 export class TerminalHost {
   private readonly terminals = new Map<string, Terminal>();
   private readonly options: Required<Omit<TerminalHostOptions, "env">> & { env: Record<string, string> };
+  private readonly onChange: () => void;
 
-  constructor(options: TerminalHostOptions = {}) {
+  /** `onChange` fires whenever the set of running shells changes. */
+  constructor(options: TerminalHostOptions = {}, onChange: () => void = () => {}) {
+    this.onChange = onChange;
     this.options = {
       shell: options.shell ?? defaultShell(),
       // Login, so a daemon started by systemd still gets the user's PATH.
@@ -257,6 +311,7 @@ export class TerminalHost {
       env: shellEnv(options.env),
       maxTerminals: options.maxTerminals ?? DEFAULT_MAX,
       scrollback: options.scrollback ?? DEFAULT_SCROLLBACK,
+      idleMs: options.idleMs ?? DEFAULT_IDLE_MS,
     };
   }
 
@@ -264,15 +319,26 @@ export class TerminalHost {
     return this.terminals.get(id);
   }
 
+  /** Shells still running, oldest first. */
+  live(): Terminal[] {
+    return [...this.terminals.values()].filter((t) => !t.exited).sort((a, b) => a.startedAt - b.startedAt);
+  }
+
   /**
    * The shell under this id, started if there is none.
    *
-   * An exited shell is returned as it is unless `restart` asks for a new one,
-   * so a reconnect shows how it ended rather than a fresh prompt.
+   * An exited shell is returned as it is to a client holding a cursor into
+   * it, so a reconnect learns how it ended rather than landing on a fresh
+   * prompt. Anyone else gets a new shell: the exit was already shown, and
+   * the screen it was shown on is gone.
    */
-  open(id: string, args: { cwd: string; cols: number; rows: number; restart?: boolean }): Terminal {
+  open(
+    id: string,
+    args: { cwd: string; cols: number; rows: number; restart?: boolean; since?: { instance: string } },
+  ): Terminal {
     const existing = this.terminals.get(id);
-    if (existing && !(args.restart && existing.exited)) return existing;
+    const finished = existing?.exited && (args.restart || args.since?.instance !== existing.instance);
+    if (existing && !finished) return existing;
     if (existing) this.terminals.delete(id);
 
     checkDirectory(args.cwd);
@@ -281,16 +347,27 @@ export class TerminalHost {
     if (live >= this.options.maxTerminals) {
       throw new Error(`${live} terminals are already open; close one first`);
     }
-    const terminal = new Terminal(id, {
-      cwd: args.cwd,
-      cols: args.cols,
-      rows: args.rows,
-      shell: this.options.shell,
-      args: this.options.args,
-      env: this.options.env,
-      scrollback: this.options.scrollback,
-    });
+    const terminal: Terminal = new Terminal(
+      id,
+      {
+        cwd: args.cwd,
+        cols: args.cols,
+        rows: args.rows,
+        shell: this.options.shell,
+        args: this.options.args,
+        env: this.options.env,
+        scrollback: this.options.scrollback,
+        idleMs: this.options.idleMs,
+      },
+      {
+        idle: () => {
+          if (this.terminals.get(id) === terminal) this.close(id);
+        },
+        exited: () => this.onChange(),
+      },
+    );
     this.terminals.set(id, terminal);
+    this.onChange();
     return terminal;
   }
 
@@ -300,6 +377,7 @@ export class TerminalHost {
     if (!terminal) return false;
     this.terminals.delete(id);
     terminal.kill();
+    if (!terminal.exited) this.onChange();
     return true;
   }
 

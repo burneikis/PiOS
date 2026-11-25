@@ -10,6 +10,21 @@ public struct TerminalCursor: Hashable, Sendable {
     public var offset: Int
 }
 
+/// A shell running on the machine, whichever device opened it.
+public struct LiveTerminal: Hashable, Sendable {
+    public var terminalId: String
+    public var cwd: String
+    /// Daemon epoch ms.
+    public var startedAt: Double
+
+    init?(json: JSON) {
+        guard let id = json["terminalId"]?.string else { return nil }
+        terminalId = id
+        cwd = json["cwd"]?.string ?? ""
+        startedAt = json["startedAt"]?.double ?? 0
+    }
+}
+
 public struct TerminalSize: Hashable, Sendable {
     public var cols: Int
     public var rows: Int
@@ -105,6 +120,10 @@ public final class TerminalChannel {
     static let idPrefix = "term:"
 
     fileprivate(set) var attachments: [String: Attachment] = [:]
+    /// Shells running on the machine, by id, as of the daemon's last word.
+    public private(set) var live: [String: LiveTerminal] = [:]
+    /// Fires with the whole set whenever a shell starts or ends.
+    public let liveChanged = Listeners<[String: LiveTerminal]>()
     private let send: (ClientCommand, String) -> Bool
     private let generateId: () -> String
 
@@ -143,6 +162,10 @@ public final class TerminalChannel {
             return true
         case let .terminalExit(id, code, signal):
             attachments[id]?.sink?.exit(code: code, signal: signal)
+            return true
+        case let .terminals(list):
+            live = Dictionary(list.map { ($0.terminalId, $0) }, uniquingKeysWith: { _, last in last })
+            liveChanged.emit(live)
             return true
         default:
             return false

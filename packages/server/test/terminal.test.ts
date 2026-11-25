@@ -90,33 +90,53 @@ test("a reconnect with a cursor gets only what it missed", async () => {
   harness.server.terminals.close("t-resume");
 });
 
-test("an exited shell stays exited until a restart is asked for", async () => {
+test("an exited shell is shown to a cursor into it, and replaced for anyone else", async () => {
   const client = await hello(harness);
   const first = await open(client, "t-restart");
   client.send({ type: "terminal_input", terminalId: "t-restart", data: "exit 2\n" });
   await client.waitFor((f) => f.type === "terminal_exit" && f.terminalId === "t-restart");
 
+  // A reconnect that held the old screen learns how it ended.
   const again = await hello(harness);
-  const reattached = await open(again, "t-restart");
+  const reattached = await open(again, "t-restart", { since: { instance: first.instance, offset: 0 } });
   assert.equal(reattached.instance, first.instance);
   await again.waitFor((f) => f.type === "terminal_exit" && f.terminalId === "t-restart");
 
-  const restarted = await open(again, "t-restart", { restart: true });
+  // A screen opened afresh gets a new shell, not a finished one.
+  const fresh = await hello(harness);
+  const restarted = await open(fresh, "t-restart");
   assert.notEqual(restarted.instance, first.instance);
   assert.equal(restarted.reset, true);
-  again.send({ type: "terminal_input", terminalId: "t-restart", data: "echo alive\n" });
-  await waitForText(again, "t-restart", "alive");
+  fresh.send({ type: "terminal_input", terminalId: "t-restart", data: "echo alive\n" });
+  await waitForText(fresh, "t-restart", "alive");
 
-  const closeId = again.send({ type: "terminal_close", terminalId: "t-restart" });
-  await again.waitForCommand(closeId);
-  // The first exit was the old shell's, replayed on attach; this is the new one's.
-  await again.waitFor(
-    () =>
-      again.received.filter((f) => f.type === "terminal_exit" && f.terminalId === "t-restart")
-        .length >= 2,
-  );
-  client.close();
-  again.close();
+  const closeId = fresh.send({ type: "terminal_close", terminalId: "t-restart" });
+  await fresh.waitForCommand(closeId);
+  await fresh.waitFor((f) => f.type === "terminal_exit" && f.terminalId === "t-restart");
+  for (const c of [client, again, fresh]) c.close();
+});
+
+type Terminals = Extract<ServerFrame, { type: "terminals" }>;
+
+function liveIds(client: TestClient): string[] | undefined {
+  const last = client.received.filter((f): f is Terminals => f.type === "terminals").at(-1);
+  return last?.terminals.map((t) => t.terminalId);
+}
+
+test("every device hears which shells are running", async () => {
+  const watcher = await hello(harness);
+  await watcher.waitFor((f) => f.type === "terminals");
+  assert.ok(!liveIds(watcher)?.includes("t-list"));
+
+  const client = await hello(harness);
+  await open(client, "t-list");
+  await watcher.waitFor(() => liveIds(watcher)?.includes("t-list") === true);
+  const late = await hello(harness);
+  await late.waitFor(() => liveIds(late)?.includes("t-list") === true);
+
+  client.send({ type: "terminal_input", terminalId: "t-list", data: "exit\n" });
+  await watcher.waitFor(() => liveIds(watcher)?.includes("t-list") === false);
+  for (const c of [watcher, client, late]) c.close();
 });
 
 test("a directory that is not there is refused", async () => {
@@ -178,5 +198,29 @@ test("the number of live shells is capped", async () => {
   assert.throws(() => host.open("c", { cwd, cols: 80, rows: 24 }), /close one/);
   // The same id is the same shell, not a third one.
   assert.equal(host.open("a", { cwd, cols: 80, rows: 24 }), host.get("a"));
+  host.closeAll();
+});
+
+test("a shell nobody is attached to is closed after the idle timeout", async () => {
+  let changes = 0;
+  const host = new TerminalHost({ ...SHELL, idleMs: 150 }, () => changes++);
+  const watched = host.open("watched", { cwd, cols: 80, rows: 24 });
+  const live = sink();
+  watched.attach(live);
+  const left = host.open("left", { cwd, cols: 80, rows: 24 });
+  assert.equal(changes, 2);
+
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  assert.equal(host.get("left"), undefined, "the detached shell is gone");
+  assert.ok(!host.live().includes(left));
+  assert.deepEqual(host.live().map((t) => t.id), ["watched"]);
+
+  // Detaching starts the clock; attaching again stops it.
+  watched.detach(live);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  watched.attach(live);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(host.get("watched"), watched);
+  assert.ok(changes >= 3);
   host.closeAll();
 });

@@ -105,3 +105,15 @@ test("input is never queued while disconnected", async () => {
   handle.detach();
   assert.equal(handle.write("x"), false, "a detached handle is inert");
 });
+
+test("the running shells are tracked whoever opened them", async () => {
+  const { transports, client } = await setup();
+  const seen: string[][] = [];
+  client.terminals.subscribeLive((running) => seen.push([...running.keys()]));
+  const emit = transports.last.emit.bind(transports.last);
+  emit({ v: WIRE_VERSION, type: "terminals", terminals: [{ terminalId: "s1", cwd: "/w", startedAt: 1 }] });
+  emit({ v: WIRE_VERSION, type: "terminals", terminals: [] });
+
+  assert.deepEqual(seen, [["s1"], []]);
+  assert.equal(client.terminals.live().size, 0);
+});

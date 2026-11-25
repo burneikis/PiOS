@@ -81,7 +81,12 @@ export class PiosServer {
     });
     this.push = new PushStore(pushStorePath(this.config), this.config.pushSubject);
     this.images = new ImageStore(join(this.config.dataDir, "images"));
-    this.terminals = new TerminalHost(options.terminals);
+    this.terminals = new TerminalHost(
+      { idleMs: this.config.terminalIdleMs, ...options.terminals },
+      () => {
+        for (const connection of this.connections) connection.sendTerminals();
+      },
+    );
     this.usage = new ClaudeUsage({
       authPath: join(this.config.agentDir, "auth.json"),
       cachePath: this.config.usageCachePath,

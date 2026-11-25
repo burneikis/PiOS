@@ -42,7 +42,10 @@ struct Sidebar: View {
 
                     ForEach(drafts, id: \.sessionId) { draft in
                         row(id: draft.sessionId) {
-                            SessionRow(title: "New session", subtitle: shortPath(draft.cwd), state: SessionState(tone: .cold, label: "draft"))
+                            SessionRow(
+                                title: "New session", subtitle: shortPath(draft.cwd), state: SessionState(tone: .cold, label: "draft"),
+                                shell: model.liveTerminals.contains(draft.sessionId)
+                            )
                         }
                         .swipeActions { Button("Discard", role: .destructive) { model.discardDraft(draft.sessionId) } }
                     }
@@ -53,7 +56,8 @@ struct Sidebar: View {
                         SessionRow(
                             title: session.name ?? session.preview.map(previewText) ?? shortPath(session.cwd),
                             subtitle: "\(shortPath(session.cwd)) · \(listTime(session.sortKey))",
-                            state: .of(session, unseen: model.isUnseen(session))
+                            state: .of(session, unseen: model.isUnseen(session)),
+                            shell: model.liveTerminals.contains(session.sessionId)
                         )
                     }
                     .contextMenu {
@@ -165,6 +169,8 @@ struct SessionRow: View {
     let title: String
     let subtitle: String
     let state: SessionState
+    /// A shell is still running here, whether or not anyone is looking at it.
+    var shell = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -180,7 +186,16 @@ struct SessionRow: View {
                     .truncationMode(.head)
             }
             Spacer(minLength: 4)
-            Badge(state: state).padding(.top, 2)
+            VStack(alignment: .trailing, spacing: 6) {
+                Badge(state: state)
+                if shell {
+                    Image(systemName: "terminal")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.ok)
+                        .accessibilityLabel("Shell running")
+                }
+            }
+            .padding(.top, 2)
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 6)

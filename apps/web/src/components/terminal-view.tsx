@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import type { TerminalExitInfo, TerminalHandle } from "@pios/client-core";
+import type { TerminalHandle } from "@pios/client-core";
 import { useClient, useSupervisorState } from "../client-provider.tsx";
 import { readText } from "../clipboard.ts";
 import { collapseHome, isolate } from "../format.ts";
@@ -44,7 +44,8 @@ const KEYS: { label: string; aria: string; send: (app: boolean) => string }[] = 
  *
  * The shell belongs to the daemon: leaving this screen, losing the
  * connection, or reloading the app detaches from it and it keeps running,
- * so a build started here is still there on the way back.
+ * so a build started here is still there on the way back. The shell ending,
+ * by `exit` here or a close from any device, leaves the screen.
  */
 export function TerminalView({ terminalId, cwd, onClose }: {
   terminalId: string;
@@ -64,7 +65,6 @@ export function TerminalView({ terminalId, cwd, onClose }: {
   const [ctrl, setCtrlState] = useState<CtrlState>("off");
   const ctrlRef = useRef<CtrlState>("off");
   const ctrlArmedAt = useRef(0);
-  const [exit, setExit] = useState<TerminalExitInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmKill, setConfirmKill] = useState(false);
   const [pasteFailed, setPasteFailed] = useState(false);
@@ -85,6 +85,10 @@ export function TerminalView({ terminalId, cwd, onClose }: {
       setCtrl("off");
     }
   }
+
+  // Read through a ref, so a new callback each render does not reopen the shell.
+  const close = useRef(onClose);
+  close.current = onClose;
 
   useEffect(() => {
     const host = screen.current;
@@ -109,11 +113,10 @@ export function TerminalView({ terminalId, cwd, onClose }: {
       {
         reset: () => {
           xterm.reset();
-          setExit(null);
           setError(null);
         },
         output: (data) => xterm.write(data),
-        exit: setExit,
+        exit: () => close.current(),
         error: setError,
       },
     );
@@ -185,7 +188,6 @@ export function TerminalView({ terminalId, cwd, onClose }: {
           type="button"
           className="ghost icon"
           aria-label="close the shell"
-          disabled={Boolean(exit)}
           onClick={() => setConfirmKill(true)}
         >
           <TrashIcon />
@@ -215,52 +217,41 @@ export function TerminalView({ terminalId, cwd, onClose }: {
       {/* Tapping anywhere on the screen is how the keyboard comes up. */}
       <div className="terminal-screen" ref={screen} />
 
-      {exit ? (
-        <div className="banner terminal-exit">
-          <span className="line">
-            {exit.signal ? `Shell ended by signal ${exit.signal}` : `Shell exited with code ${exit.exitCode}`}
-          </span>
-          <button type="button" className="primary" onClick={() => handle.current?.restart()}>
-            Restart
-          </button>
-        </div>
-      ) : (
-        <div className="term-keys row">
+      <div className="term-keys row">
+        <button
+          type="button"
+          className={ctrl === "off" ? undefined : ctrl === "locked" ? "active locked" : "active"}
+          aria-pressed={ctrl !== "off"}
+          aria-label={ctrl === "locked" ? "control, locked" : "control"}
+          // Keeps focus, and so the keyboard, on the terminal.
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={(event) => {
+            tapCtrl(event.timeStamp);
+            term.current?.focus();
+          }}
+        >
+          ctrl
+        </button>
+        {KEYS.map((k) => (
           <button
             type="button"
-            className={ctrl === "off" ? undefined : ctrl === "locked" ? "active locked" : "active"}
-            aria-pressed={ctrl !== "off"}
-            aria-label={ctrl === "locked" ? "control, locked" : "control"}
-            // Keeps focus, and so the keyboard, on the terminal.
+            key={k.aria}
+            aria-label={k.aria}
             onMouseDown={(event) => event.preventDefault()}
-            onClick={(event) => {
-              tapCtrl(event.timeStamp);
-              term.current?.focus();
-            }}
+            onClick={() => key(k.send)}
           >
-            ctrl
+            {k.label}
           </button>
-          {KEYS.map((k) => (
-            <button
-              type="button"
-              key={k.aria}
-              aria-label={k.aria}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => key(k.send)}
-            >
-              {k.label}
-            </button>
-          ))}
-          <button
-            type="button"
-            aria-label="paste"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => void paste()}
-          >
-            paste
-          </button>
-        </div>
-      )}
+        ))}
+        <button
+          type="button"
+          aria-label="paste"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => void paste()}
+        >
+          paste
+        </button>
+      </div>
     </section>
   );
 }
