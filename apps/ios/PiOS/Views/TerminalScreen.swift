@@ -15,7 +15,6 @@ struct TerminalScreen: View {
     @Environment(AppModel.self) private var model
     @AppStorage("pios.terminalFontSize") private var fontSize = 12.0
     @State private var session = TerminalSession()
-    @State private var confirmClose = false
 
     var body: some View {
         VStack(spacing: 6) {
@@ -42,19 +41,16 @@ struct TerminalScreen: View {
                     Image(systemName: "doc.on.clipboard")
                 }
                 Menu {
-                    Button(role: .destructive) { confirmClose = true } label: { Label("Close the shell", systemImage: "xmark") }
+                    Button(role: .destructive) {
+                        session.kill()
+                        model.leaveTerminal()
+                    } label: {
+                        Label("Close the shell", systemImage: "xmark")
+                    }
                 } label: {
                     Image(systemName: "ellipsis")
                 }
             }
-        }
-        .confirmationDialog("Close the shell?", isPresented: $confirmClose, titleVisibility: .visible) {
-            Button("Close shell", role: .destructive) {
-                session.kill()
-                model.leaveTerminal()
-            }
-        } message: {
-            Text("It ends for every device attached to it.")
         }
         .onAppear {
             session.onEnded = { model.leaveTerminal() }
@@ -110,9 +106,12 @@ final class TerminalSession: TerminalSink {
         pending = nil
     }
 
+    /// Forgets the open request too: the keyboard dropping as the screen
+    /// leaves reports a new size, which would otherwise start a fresh shell.
     func kill() {
         handle?.kill()
         handle = nil
+        pending = nil
     }
 
     func viewReady(_ view: TerminalView) {
